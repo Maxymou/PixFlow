@@ -1,0 +1,54 @@
+services:
+  backend:
+    build: ./backend
+    container_name: pixflow-backend
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      - DATA_ROOT=/data
+    volumes:
+      - pixflow_data:/data
+    networks: [pixflow]
+
+  frontend:
+    build: ./frontend
+    container_name: pixflow-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_BASE=http://backend:4000
+    depends_on: [backend]
+    networks: [pixflow]
+
+  player:
+    build: ./player
+    container_name: pixflow-player
+    restart: unless-stopped
+    depends_on: [backend]
+    networks: [pixflow]
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    environment:
+      - DISPLAY=:0
+
+  system:
+    build: ./system
+    container_name: pixflow-system
+    restart: unless-stopped
+    network_mode: host
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - WLAN_IFACE=wlan0
+      - SSID=EVENT_WIFI
+      - PASSPHRASE=eventwifi123
+
+networks:
+  pixflow:
+    driver: bridge
+
+volumes:
+  pixflow_data:
