@@ -1,0 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+* { scrollbar-color: #22d3ee #0f172a; }
+body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
