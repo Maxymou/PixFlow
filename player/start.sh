@@ -3,6 +3,8 @@ set -euo pipefail
 node /app/server.js &
 sleep 2
 chromium \
+  --no-sandbox \
+  --disable-setuid-sandbox \
   --kiosk \
   --noerrdialogs \
   --disable-infobars \
