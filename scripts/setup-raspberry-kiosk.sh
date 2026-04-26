@@ -3,7 +3,7 @@ set -euo pipefail
 
 SERVICE_NAME="pixflow-kiosk.service"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
-KIOSK_URL=${KIOSK_URL:-http://localhost:3000}
+PIXFLOW_KIOSK_URL=${PIXFLOW_KIOSK_URL:-http://localhost:3000/player}
 TARGET_USER=${SUDO_USER:-${USER:-$(id -un)}}
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -54,7 +54,7 @@ exec ${CHROMIUM_BIN} \\
   --disable-features=TranslateUI \\
   --no-first-run \\
   --disable-restore-session-state \\
-  "${KIOSK_URL}"
+  "${PIXFLOW_KIOSK_URL}"
 LAUNCH
 chmod 755 /usr/local/bin/pixflow-kiosk-launch.sh
 

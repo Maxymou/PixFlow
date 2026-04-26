@@ -3,6 +3,7 @@ import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import { api } from './api';
 import { Dashboard } from './components/Dashboard';
 import { ProjectDetail } from './components/ProjectDetail';
+import { PlayerView } from './components/PlayerView';
 
 export default function App() {
   const [projects, setProjects] = useState([]);
@@ -26,6 +27,17 @@ export default function App() {
   }, []);
 
   const activeCount = projects.filter((p) => p.active).length;
+  const isPlayerRoute = location.pathname.startsWith('/player');
+
+  if (isPlayerRoute) {
+    return (
+      <div className="h-screen w-screen overflow-hidden bg-black text-slate-100">
+        <Routes>
+          <Route path="/player" element={<PlayerView />} />
+        </Routes>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950/20 to-slate-950 text-slate-100">
@@ -63,6 +75,7 @@ export default function App() {
             path="/projects/:id"
             element={<ProjectDetail projects={projects} onRefresh={reload} />}
           />
+          <Route path="/player" element={<PlayerView />} />
         </Routes>
       </main>
     </div>

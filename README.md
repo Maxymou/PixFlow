@@ -41,10 +41,18 @@ Choose:
 - optionally `Install Raspberry kiosk display service? [Y/n]`
 
 In PROD mode:
-- frontend is available at `http://<raspberry-ip>:3000`
+- admin/dashboard is available at `http://<raspberry-ip>:3000/`
+- kiosk/player is available at `http://<raspberry-ip>:3000/player`
 - backend is available at `http://<raspberry-ip>:4000`
-- kiosk service runs on the Raspberry Pi host via `pixflow-kiosk.service`
+- kiosk service runs on the Raspberry Pi host via `pixflow-kiosk.service` and opens `/player` by default
 - Docker player is disabled by default because Raspberry Pi OS Lite has no X server inside Docker
+
+You can override the default host kiosk URL before running the setup script:
+
+```bash
+export PIXFLOW_KIOSK_URL=http://localhost:3000/player
+sudo bash scripts/setup-raspberry-kiosk.sh
+```
 
 ## DEV installation (Proxmox / server)
 ```bash
