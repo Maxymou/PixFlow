@@ -14,7 +14,7 @@ export function Dashboard({ projects, onRefresh }) {
     if (!name.trim()) return;
     setCreating(true);
     try {
-      await api('/projects', { method: 'POST', body: JSON.stringify({ name }) });
+      await api('/api/projects', { method: 'POST', body: JSON.stringify({ name }) });
       setName('');
       onRefresh();
     } finally {
@@ -23,7 +23,7 @@ export function Dashboard({ projects, onRefresh }) {
   };
 
   const toggleProject = async (project) => {
-    await api(`/projects/${project.id}/active`, {
+    await api(`/api/projects/${project.id}/active`, {
       method: 'PATCH',
       body: JSON.stringify({ active: !project.active }),
     });
@@ -32,7 +32,7 @@ export function Dashboard({ projects, onRefresh }) {
 
   const deleteProject = async (project) => {
     if (!confirm(`Delete "${project.name}" and all its media?`)) return;
-    await api(`/projects/${project.id}`, { method: 'DELETE' });
+    await api(`/api/projects/${project.id}`, { method: 'DELETE' });
     onRefresh();
   };
 

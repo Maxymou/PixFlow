@@ -13,7 +13,7 @@ export function ProjectDetail({ projects, onRefresh }) {
   const project = useMemo(() => projects.find((p) => p.id === id), [projects, id]);
 
   const loadMedia = useCallback(async () => {
-    const items = await api(`/media?projectId=${id}`);
+    const items = await api(`/api/media?projectId=${id}`);
     setMedia(items);
   }, [id]);
 
@@ -29,7 +29,11 @@ export function ProjectDetail({ projects, onRefresh }) {
         form.append('file', file);
         form.append('projectId', id);
         form.append('duration', duration);
-        await fetch(`${API_BASE}/media/upload`, { method: 'POST', body: form });
+        const res = await fetch(`${API_BASE}/api/media/upload`, { method: 'POST', body: form });
+        if (!res.ok) {
+          const message = await res.text();
+          throw new Error(message || 'Upload failed');
+        }
         await loadMedia();
       } finally {
         setUploading(false);
@@ -39,7 +43,7 @@ export function ProjectDetail({ projects, onRefresh }) {
   );
 
   const toggle = async (item) => {
-    await api(`/media/${item.id}/active`, {
+    await api(`/api/media/${item.id}/active`, {
       method: 'PATCH',
       body: JSON.stringify({ active: !item.active }),
     });
@@ -48,12 +52,12 @@ export function ProjectDetail({ projects, onRefresh }) {
 
   const remove = async (item) => {
     if (!confirm(`Delete "${item.file}"?`)) return;
-    await api(`/media/${item.id}`, { method: 'DELETE' });
+    await api(`/api/media/${item.id}`, { method: 'DELETE' });
     loadMedia();
   };
 
   const updateDuration = async (item, newDuration) => {
-    await api(`/media/${item.id}`, {
+    await api(`/api/media/${item.id}`, {
       method: 'PATCH',
       body: JSON.stringify({ duration: newDuration }),
     });
@@ -64,7 +68,6 @@ export function ProjectDetail({ projects, onRefresh }) {
 
   return (
     <div className="animate-slide-up space-y-5">
-      {/* ── Breadcrumb + header ────────────────────────────── */}
       <div className="flex items-center gap-3">
         <Link to="/" className="btn-ghost flex-shrink-0">
           ← Back
@@ -82,7 +85,6 @@ export function ProjectDetail({ projects, onRefresh }) {
         </span>
       </div>
 
-      {/* ── Upload drop zone ───────────────────────────────── */}
       <div
         className={`relative cursor-pointer rounded-xl border-2 border-dashed p-8 text-center transition-all
           ${isDragging
@@ -119,7 +121,6 @@ export function ProjectDetail({ projects, onRefresh }) {
         </p>
         <p className="mt-1 text-xs text-slate-500">Images and videos supported</p>
 
-        {/* Duration control — stop click from bubbling to the drop zone */}
         <div
           className="mt-5 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/80 px-3 py-2"
           onClick={(e) => e.stopPropagation()}
@@ -137,7 +138,6 @@ export function ProjectDetail({ projects, onRefresh }) {
         </div>
       </div>
 
-      {/* ── Media list ─────────────────────────────────────── */}
       <div>
         <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-600">
           Media Files ({media.length})
@@ -163,7 +163,6 @@ export function ProjectDetail({ projects, onRefresh }) {
   );
 }
 
-/* ── MediaRow ──────────────────────────────────────────────── */
 function MediaRow({ item, onToggle, onRemove, onDurationChange }) {
   const [editingDur, setEditingDur] = useState(false);
   const [dur, setDur] = useState(item.duration ?? 5);
@@ -180,7 +179,6 @@ function MediaRow({ item, onToggle, onRemove, onDurationChange }) {
         !item.active ? 'opacity-50' : ''
       }`}
     >
-      {/* Thumbnail */}
       <div className="h-12 w-16 flex-shrink-0 overflow-hidden rounded-lg bg-slate-800">
         {item.type === 'image' ? (
           <img
@@ -196,7 +194,6 @@ function MediaRow({ item, onToggle, onRemove, onDurationChange }) {
         )}
       </div>
 
-      {/* Info */}
       <div className="min-w-0 flex-1">
         <p
           className="truncate text-sm font-medium text-slate-200"
@@ -244,7 +241,6 @@ function MediaRow({ item, onToggle, onRemove, onDurationChange }) {
         </div>
       </div>
 
-      {/* Actions */}
       <div className="flex flex-shrink-0 items-center gap-1.5">
         <button onClick={() => onToggle(item)} className="btn-ghost">
           {item.active ? 'Pause' : 'Enable'}
