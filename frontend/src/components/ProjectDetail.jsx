@@ -8,6 +8,7 @@ export function ProjectDetail({ projects, onRefresh }) {
   const [duration, setDuration] = useState(5);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const fileRef = useRef(null);
 
   const project = useMemo(() => projects.find((p) => p.id === id), [projects, id]);
@@ -24,6 +25,7 @@ export function ProjectDetail({ projects, onRefresh }) {
       const file = files?.[0];
       if (!file || uploading) return;
       setUploading(true);
+      setUploadError('');
       try {
         const form = new FormData();
         form.append('file', file);
@@ -35,6 +37,8 @@ export function ProjectDetail({ projects, onRefresh }) {
           throw new Error(message || 'Upload failed');
         }
         await loadMedia();
+      } catch (error) {
+        setUploadError(error.message || 'Upload failed');
       } finally {
         setUploading(false);
       }
@@ -120,6 +124,10 @@ export function ProjectDetail({ projects, onRefresh }) {
             : 'Drag & drop or click to upload'}
         </p>
         <p className="mt-1 text-xs text-slate-500">Images and videos supported</p>
+
+        {uploadError && (
+          <p className="mt-2 text-sm text-rose-400">{uploadError}</p>
+        )}
 
         <div
           className="mt-5 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/80 px-3 py-2"
