@@ -1,43 +1,95 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
-import { useEffect, useState } from 'react';
 import { api } from './api';
 import { Dashboard } from './components/Dashboard';
 import { ProjectDetail } from './components/ProjectDetail';
 
 export default function App() {
   const [projects, setProjects] = useState([]);
+  const [status, setStatus] = useState('loading');
   const location = useLocation();
 
   const reload = async () => {
-    const data = await api('/projects');
-    setProjects(data);
+    try {
+      const data = await api('/projects');
+      setProjects(data);
+      setStatus('online');
+    } catch {
+      setStatus('offline');
+    }
   };
 
-  useEffect(() => { reload(); }, []);
+  useEffect(() => {
+    reload();
+    const id = setInterval(reload, 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const activeCount = projects.filter((p) => p.active).length;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 text-slate-100">
-      <header className="sticky top-0 z-10 border-b border-cyan-500/20 bg-slate-950/80 backdrop-blur">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950/20 to-slate-950 text-slate-100">
+      {/* ── Header ─────────────────────────────────────────── */}
+      <header className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-          <Link to="/" className="flex items-center gap-3">
-            <img src="/logo.png" alt="PixFlow" className="h-10 w-10 rounded-lg" />
+          <Link to="/" className="flex items-center gap-3 transition-opacity hover:opacity-80">
+            <img src="/logo.png" alt="PixFlow" className="h-9 w-9 rounded-lg" />
             <div>
-              <h1 className="text-lg font-semibold">PixFlow Signage</h1>
-              <p className="text-xs text-cyan-300">Offline Digital Signage Control</p>
+              <h1 className="text-base font-semibold leading-tight tracking-tight">
+                PixFlow Signage
+              </h1>
+              <p className="text-xs text-slate-500">Offline Digital Signage</p>
             </div>
           </Link>
-          <span className="rounded-full border border-violet-400/50 px-3 py-1 text-xs text-violet-200">
-            {location.pathname === '/' ? 'Dashboard' : 'Project'}
-          </span>
+
+          <div className="flex items-center gap-3">
+            {status === 'online' && activeCount > 0 && (
+              <span className="hidden items-center gap-1.5 text-xs text-emerald-400 sm:flex">
+                <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-emerald-400" />
+                {activeCount} active
+              </span>
+            )}
+
+            <StatusPill status={status} />
+          </div>
         </div>
       </header>
+
+      {/* ── Main ───────────────────────────────────────────── */}
       <main className="mx-auto max-w-5xl px-4 py-6">
         <Routes>
           <Route path="/" element={<Dashboard projects={projects} onRefresh={reload} />} />
-          <Route path="/projects/:id" element={<ProjectDetail projects={projects} onRefresh={reload} />} />
+          <Route
+            path="/projects/:id"
+            element={<ProjectDetail projects={projects} onRefresh={reload} />}
+          />
         </Routes>
       </main>
     </div>
+  );
+}
+
+function StatusPill({ status }) {
+  if (status === 'loading') {
+    return (
+      <span className="badge-loading">
+        <span className="h-1.5 w-1.5 rounded-full bg-slate-500" />
+        Connecting…
+      </span>
+    );
+  }
+  if (status === 'offline') {
+    return (
+      <span className="badge-offline">
+        <span className="h-1.5 w-1.5 rounded-full bg-rose-400" />
+        Offline
+      </span>
+    );
+  }
+  return (
+    <span className="badge-live">
+      <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-emerald-400" />
+      Online
+    </span>
   );
 }

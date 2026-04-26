@@ -103,6 +103,27 @@ app.patch('/projects/:id/active', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+app.delete('/projects/:id', async (req, res, next) => {
+  try {
+    let projects = await readJson(projectsFile);
+    const idx = projects.findIndex((p) => p.id === req.params.id);
+    if (idx < 0) return res.status(404).json({ error: 'project not found' });
+    projects.splice(idx, 1);
+    await writeJson(projectsFile, projects);
+
+    let media = await readJson(mediaFile);
+    const orphaned = media.filter((m) => m.projectId === req.params.id);
+    media = media.filter((m) => m.projectId !== req.params.id);
+    await writeJson(mediaFile, media);
+    for (const item of orphaned) {
+      await fs.rm(path.join(mediaDir, item.file), { force: true });
+    }
+
+    await buildPlaylist();
+    res.status(204).send();
+  } catch (error) { next(error); }
+});
+
 app.get('/media', async (req, res, next) => {
   try {
     const media = await readJson(mediaFile);
@@ -142,6 +163,19 @@ app.patch('/media/:id/active', async (req, res, next) => {
     const item = media.find((m) => m.id === req.params.id);
     if (!item) return res.status(404).json({ error: 'media not found' });
     item.active = Boolean(req.body.active);
+    await writeJson(mediaFile, media);
+    await buildPlaylist();
+    res.json(item);
+  } catch (error) { next(error); }
+});
+
+app.patch('/media/:id', async (req, res, next) => {
+  try {
+    const media = await readJson(mediaFile);
+    const item = media.find((m) => m.id === req.params.id);
+    if (!item) return res.status(404).json({ error: 'media not found' });
+    if (req.body.duration !== undefined) item.duration = Number(req.body.duration);
+    if (req.body.active !== undefined) item.active = Boolean(req.body.active);
     await writeJson(mediaFile, media);
     await buildPlaylist();
     res.json(item);
