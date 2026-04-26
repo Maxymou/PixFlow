@@ -14,6 +14,7 @@ const projectsDir = path.join(dataRoot, 'projects');
 const projectsFile = path.join(projectsDir, 'projects.json');
 const mediaFile = path.join(projectsDir, 'media.json');
 const playlistFile = path.join(dataRoot, 'playlist.json');
+const settingsFile = path.join(dataRoot, 'settings.json');
 
 const MAX_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
 const MAX_MEDIA_FILES = Number(process.env.MAX_MEDIA_FILES || 2000);
@@ -49,7 +50,7 @@ const ensureFiles = async () => {
   await fs.mkdir(incomingDir, { recursive: true });
   await fs.mkdir(mediaDir, { recursive: true });
   await fs.mkdir(projectsDir, { recursive: true });
-  for (const [filePath, initial] of [[projectsFile, []], [mediaFile, []], [playlistFile, []]]) {
+  for (const [filePath, initial] of [[projectsFile, []], [mediaFile, []], [playlistFile, []], [settingsFile, { wifi: { ssid: 'PixFlow', password: 'pixflow1234' } }]]) {
     try {
       await fs.access(filePath);
     } catch {
@@ -226,6 +227,59 @@ app.get('/playlist', async (_req, res, next) => {
     res.json(playlist);
   } catch (error) { next(error); }
 });
+
+app.get('/settings', async (_req, res, next) => {
+  try {
+    const settings = await readJson(settingsFile);
+    res.json(settings);
+  } catch (error) { next(error); }
+});
+
+app.patch('/settings/wifi', async (req, res, next) => {
+  try {
+    const { ssid, password } = req.body || {};
+
+    if (typeof ssid !== 'string') {
+      return res.status(400).json({ error: 'ssid must be a string' });
+    }
+
+    const trimmedSsid = ssid.trim();
+    if (!trimmedSsid) {
+      return res.status(400).json({ error: 'ssid is required' });
+    }
+
+    if (trimmedSsid.length > 32) {
+      return res.status(400).json({ error: 'ssid must be 32 characters or fewer' });
+    }
+
+    if (typeof password !== 'string') {
+      return res.status(400).json({ error: 'password must be a string' });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'password must be at least 8 characters' });
+    }
+
+    if (password.length > 63) {
+      return res.status(400).json({ error: 'password must be 63 characters or fewer' });
+    }
+
+    const settings = await readJson(settingsFile);
+
+    settings.wifi = {
+      ...(settings.wifi || {}),
+      ssid: trimmedSsid,
+      password,
+    };
+
+    // TODO: Apply Wi-Fi hotspot settings to the Raspberry Pi host system through a controlled host-side service.
+    // For now, PixFlow only stores the desired hotspot configuration in /data/settings.json.
+    await writeJson(settingsFile, settings);
+
+    res.json(settings);
+  } catch (error) { next(error); }
+});
+
 
 app.use((error, _req, res, _next) => {
   if (error instanceof multer.MulterError) {

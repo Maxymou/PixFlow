@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { Link, Route, Routes, useLocation } from 'react-router-dom';
+import { Route, Routes, useLocation } from 'react-router-dom';
 import { api } from './api';
 import { Dashboard } from './components/Dashboard';
 import { ProjectDetail } from './components/ProjectDetail';
 import { PlayerView } from './components/PlayerView';
+import { UserMenu } from './components/UserMenu';
 
 export default function App() {
   const [projects, setProjects] = useState([]);
   const [status, setStatus] = useState('loading');
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const location = useLocation();
 
   const reload = async () => {
@@ -44,7 +46,13 @@ export default function App() {
       {/* ── Header ─────────────────────────────────────────── */}
       <header className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-          <Link to="/" className="flex items-center gap-3 transition-opacity hover:opacity-80">
+          <button
+            type="button"
+            onClick={() => setIsUserMenuOpen(true)}
+            aria-label="Open settings menu"
+            aria-expanded={isUserMenuOpen}
+            className="flex items-center gap-3 text-left transition-opacity hover:opacity-80"
+          >
             <img src="/logo.png" alt="PixFlow" className="h-9 w-9 rounded-lg" />
             <div>
               <h1 className="text-base font-semibold leading-tight tracking-tight">
@@ -52,7 +60,7 @@ export default function App() {
               </h1>
               <p className="text-xs text-slate-500">Offline Digital Signage</p>
             </div>
-          </Link>
+          </button>
 
           <div className="flex items-center gap-3">
             {status === 'online' && activeCount > 0 && (
@@ -78,6 +86,8 @@ export default function App() {
           <Route path="/player" element={<PlayerView />} />
         </Routes>
       </main>
+
+      <UserMenu open={isUserMenuOpen} onClose={() => setIsUserMenuOpen(false)} />
     </div>
   );
 }
