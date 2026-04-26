@@ -1,28 +1,61 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API_BASE, api } from '../api';
 
 const PLAYLIST_REFRESH_MS = 30_000;
+const PLAYLIST_RETRY_MS = 10_000;
 
 export function PlayerView() {
   const [playlist, setPlaylist] = useState([]);
   const [index, setIndex] = useState(0);
   const [status, setStatus] = useState('loading');
+  const [failedMedia, setFailedMedia] = useState({});
+  const retryTimeoutRef = useRef(null);
+
+  const clearRetry = useCallback(() => {
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
+    }
+  }, []);
 
   const loadPlaylist = useCallback(async () => {
     try {
-      const items = await api('/playlist');
-      setPlaylist(Array.isArray(items) ? items : []);
+      const items = await api('/api/playlist');
+      const nextPlaylist = Array.isArray(items) ? items : [];
+      setPlaylist(nextPlaylist);
+      localStorage.setItem('playlist', JSON.stringify(nextPlaylist));
       setStatus('online');
+      clearRetry();
     } catch {
+      const cached = localStorage.getItem('playlist');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setPlaylist((current) => (current.length > 0 ? current : parsed));
+          }
+        } catch {
+          // Ignore invalid cache values.
+        }
+      }
       setStatus('offline');
+      if (!retryTimeoutRef.current) {
+        retryTimeoutRef.current = setTimeout(() => {
+          retryTimeoutRef.current = null;
+          loadPlaylist();
+        }, PLAYLIST_RETRY_MS);
+      }
     }
-  }, []);
+  }, [clearRetry]);
 
   useEffect(() => {
     loadPlaylist();
     const id = setInterval(loadPlaylist, PLAYLIST_REFRESH_MS);
-    return () => clearInterval(id);
-  }, [loadPlaylist]);
+    return () => {
+      clearInterval(id);
+      clearRetry();
+    };
+  }, [clearRetry, loadPlaylist]);
 
   useEffect(() => {
     if (playlist.length === 0) {
@@ -39,7 +72,11 @@ export function PlayerView() {
     });
   }, [playlist.length]);
 
-  const currentItem = playlist[index] ?? null;
+  const activePlaylist = useMemo(() => (
+    playlist.filter((item, itemIndex) => !failedMedia[`${item.file}-${itemIndex}`])
+  ), [failedMedia, playlist]);
+
+  const currentItem = activePlaylist[index] ?? null;
 
   useEffect(() => {
     if (!currentItem || currentItem.type !== 'image') return undefined;
@@ -52,8 +89,31 @@ export function PlayerView() {
   const currentUrl = useMemo(() => {
     if (!currentItem?.file) return null;
     if (/^https?:\/\//i.test(currentItem.file)) return currentItem.file;
-    return `${API_BASE}${currentItem.file}`;
+    if (currentItem.file.startsWith('/')) return `${API_BASE}${currentItem.file}`;
+    return `${API_BASE}/media/${currentItem.file}`;
   }, [currentItem]);
+
+  const nextUrl = useMemo(() => {
+    if (activePlaylist.length < 2) return null;
+    const nextItem = activePlaylist[(index + 1) % activePlaylist.length];
+    if (!nextItem?.file || nextItem.type !== 'image') return null;
+    if (/^https?:\/\//i.test(nextItem.file)) return nextItem.file;
+    if (nextItem.file.startsWith('/')) return `${API_BASE}${nextItem.file}`;
+    return `${API_BASE}/media/${nextItem.file}`;
+  }, [activePlaylist, index]);
+
+  useEffect(() => {
+    if (!nextUrl) return;
+    const img = new Image();
+    img.src = nextUrl;
+  }, [nextUrl]);
+
+  const markCurrentFailed = useCallback(() => {
+    if (!currentItem) return;
+    const key = `${currentItem.file}-${index}`;
+    setFailedMedia((current) => ({ ...current, [key]: true }));
+    next();
+  }, [currentItem, index, next]);
 
   if (!currentItem || !currentUrl) {
     return (
@@ -80,6 +140,7 @@ export function PlayerView() {
           muted
           playsInline
           onEnded={next}
+          onError={markCurrentFailed}
         />
       ) : (
         <img
@@ -88,6 +149,7 @@ export function PlayerView() {
           alt=""
           className="h-full w-full object-contain"
           draggable={false}
+          onError={markCurrentFailed}
         />
       )}
     </div>

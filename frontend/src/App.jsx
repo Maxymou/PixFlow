@@ -12,7 +12,7 @@ export default function App() {
 
   const reload = async () => {
     try {
-      const data = await api('/projects');
+      const data = await api('/api/projects');
       setProjects(data);
       setStatus('online');
     } catch {

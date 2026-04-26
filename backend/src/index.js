@@ -15,6 +15,10 @@ const projectsFile = path.join(projectsDir, 'projects.json');
 const mediaFile = path.join(projectsDir, 'media.json');
 const playlistFile = path.join(dataRoot, 'playlist.json');
 
+const MAX_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
+const MAX_MEDIA_FILES = Number(process.env.MAX_MEDIA_FILES || 2000);
+const ALLOWED_UPLOAD_TYPES = new Set(['image/jpeg', 'image/png', 'video/mp4']);
+
 app.use(cors());
 app.use(express.json());
 app.use('/media', express.static(mediaDir));
@@ -26,9 +30,20 @@ const storage = multer.diskStorage({
   filename: (_req, file, cb) => {
     const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
     cb(null, `${Date.now()}-${safeName}`);
-  }
+  },
 });
-const upload = multer({ storage });
+
+const upload = multer({
+  storage,
+  limits: { fileSize: MAX_UPLOAD_SIZE_BYTES },
+  fileFilter: (_req, file, cb) => {
+    if (!ALLOWED_UPLOAD_TYPES.has(file.mimetype)) {
+      cb(new Error('unsupported file type'));
+      return;
+    }
+    cb(null, true);
+  },
+});
 
 const ensureFiles = async () => {
   await fs.mkdir(incomingDir, { recursive: true });
@@ -62,11 +77,20 @@ const buildPlaylist = async () => {
     .map((m) => ({
       type: m.type,
       file: `/media/${m.file}`,
-      ...(m.type === 'image' ? { duration: m.duration || 5 } : {})
+      ...(m.type === 'image' ? { duration: m.duration || 5 } : {}),
     }));
 
   await writeJson(playlistFile, playlist);
   return playlist;
+};
+
+const ensureMediaCapacity = async () => {
+  const media = await readJson(mediaFile);
+  if (media.length >= MAX_MEDIA_FILES) {
+    const err = new Error(`media storage limit reached (${MAX_MEDIA_FILES} files)`);
+    err.status = 400;
+    throw err;
+  }
 };
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
@@ -136,6 +160,7 @@ app.post('/media/upload', upload.single('file'), async (req, res, next) => {
   try {
     const { projectId, duration } = req.body;
     if (!projectId || !req.file) return res.status(400).json({ error: 'projectId and file are required' });
+    await ensureMediaCapacity();
 
     const media = await readJson(mediaFile);
     const finalName = `${nanoid()}-${req.file.filename}`;
@@ -147,7 +172,7 @@ app.post('/media/upload', upload.single('file'), async (req, res, next) => {
       type: mediaTypeFromName(req.file.originalname, req.file.mimetype),
       file: finalName,
       active: true,
-      duration: Number(duration || 5)
+      duration: Number(duration || 5),
     };
 
     media.push(item);
@@ -203,6 +228,18 @@ app.get('/playlist', async (_req, res, next) => {
 });
 
 app.use((error, _req, res, _next) => {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: 'file too large (max 100MB)' });
+    }
+    return res.status(400).json({ error: error.message });
+  }
+  if (error.message === 'unsupported file type') {
+    return res.status(400).json({ error: 'unsupported file type. allowed: image/jpeg, image/png, video/mp4' });
+  }
+  if (error.status) {
+    return res.status(error.status).json({ error: error.message });
+  }
   console.error(error);
   res.status(500).json({ error: 'internal server error' });
 });
