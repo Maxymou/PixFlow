@@ -3,5 +3,75 @@
 @tailwind utilities;
 
 :root { color-scheme: dark; }
-* { scrollbar-color: #22d3ee #0f172a; }
+* { scrollbar-color: #1e293b #020617; scrollbar-width: thin; }
 body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+
+@layer components {
+  /* ── Buttons ─────────────────────────────────────────────── */
+  .btn-primary {
+    @apply rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950
+           transition-all hover:bg-cyan-400 hover:shadow-glow-cyan
+           active:scale-95 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-ghost {
+    @apply rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-400
+           transition-all hover:border-slate-600 hover:bg-slate-800 hover:text-slate-300
+           active:scale-95;
+  }
+  .btn-violet {
+    @apply rounded-lg bg-violet-600/80 px-3 py-1.5 text-xs font-medium text-white
+           transition-all hover:bg-violet-500 active:scale-95;
+  }
+  .btn-danger {
+    @apply rounded-lg border border-rose-500/30 px-2.5 py-1 text-xs text-rose-400
+           transition-all hover:border-rose-400 hover:bg-rose-950/50 active:scale-95;
+  }
+
+  /* ── Cards ───────────────────────────────────────────────── */
+  .card {
+    @apply rounded-xl border border-slate-800 bg-slate-900 p-4;
+  }
+  .card-interactive {
+    @apply card transition-all hover:border-slate-700 hover:bg-slate-800/70;
+  }
+
+  /* ── Status badges ───────────────────────────────────────── */
+  .badge-active {
+    @apply inline-flex items-center gap-1 rounded-full border border-emerald-500/30
+           bg-emerald-950/60 px-2 py-0.5 text-xs font-medium text-emerald-400;
+  }
+  .badge-inactive {
+    @apply inline-flex items-center rounded-full border border-slate-700
+           bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-500;
+  }
+  .badge-live {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30
+           bg-emerald-950/50 px-2.5 py-1 text-xs font-medium text-emerald-400;
+  }
+  .badge-offline {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-rose-500/30
+           bg-rose-950/50 px-2.5 py-1 text-xs font-medium text-rose-400;
+  }
+  .badge-loading {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-slate-700
+           bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-500;
+  }
+
+  /* ── Form inputs ─────────────────────────────────────────── */
+  .input {
+    @apply rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm
+           text-slate-100 placeholder-slate-600
+           focus:border-cyan-500/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/20
+           transition-all;
+  }
+  .input-sm {
+    @apply rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-sm
+           text-slate-200 text-center
+           focus:border-cyan-500/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/20;
+  }
+
+  /* ── Stat card ───────────────────────────────────────────── */
+  .stat-card {
+    @apply card flex flex-col gap-0.5;
+  }
+}
