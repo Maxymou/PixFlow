@@ -24,6 +24,7 @@ services:
 
   player:
     build: ./player
+    profiles: ["prod"]
     container_name: pixflow-player
     restart: unless-stopped
     depends_on: [backend]
@@ -35,6 +36,7 @@ services:
 
   system:
     build: ./system
+    profiles: ["prod"]
     container_name: pixflow-system
     restart: unless-stopped
     network_mode: host

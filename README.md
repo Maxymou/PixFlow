@@ -31,6 +31,12 @@ Production-ready, fully offline digital signage stack with Docker Compose.
 └── logo.png
 ```
 
+## Install PixFlow
+```bash
+chmod +x install.sh
+./install.sh
+```
+
 ## Quick start
 ```bash
 docker compose build
