@@ -24,7 +24,7 @@ services:
 
   player:
     build: ./player
-    profiles: ["prod"]
+    profiles: ["docker-player"]
     container_name: pixflow-player
     restart: unless-stopped
     depends_on: [backend]

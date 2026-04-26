@@ -1,12 +1,68 @@
-# PixFlow Offline Signage (Raspberry Pi 4)
+# PixFlow Offline Signage
 
-Production-ready, fully offline digital signage stack with Docker Compose.
+PixFlow is an offline-first digital signage stack with Dockerized backend/frontend services and Raspberry Pi production support.
 
-## Services
-- **frontend**: React + Vite + Tailwind mobile-first management UI (port `3000`)
-- **backend**: Node.js 20 + Express REST API + uploads (port `4000`)
-- **player**: Chromium kiosk HTML5 signage player (no external port)
-- **system**: hostapd + dnsmasq hotspot service (optional but included)
+## Services and profiles
+- **backend** (`:4000`) - always enabled.
+- **frontend** (`:3000`) - always enabled.
+- **system** (hotspot helper) - enabled by Docker `prod` profile.
+- **player** (Chromium in Docker) - **disabled by default** and now only available through the optional `docker-player` profile.
+
+## Recommended Raspberry Pi PROD architecture
+- Docker: `backend`, `frontend`, `system` (`--profile prod`)
+- Host systemd kiosk: Chromium launcher on Raspberry Pi host (not in Docker)
+
+This avoids X11/display issues on Raspberry Pi OS Lite where no desktop session exists inside containers.
+
+## Recommended OS
+- Raspberry Pi OS Lite 64-bit
+
+## Raspberry Pi installation (PROD)
+```bash
+sudo apt update
+sudo apt upgrade -y
+sudo apt install -y git curl
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+sudo reboot
+```
+
+After reboot:
+
+```bash
+git clone https://github.com/Maxymou/PixFlow.git
+cd PixFlow
+chmod +x install.sh
+./install.sh
+```
+
+Choose:
+- `2) Prod (Raspberry Pi)`
+- optionally `Install Raspberry kiosk display service? [Y/n]`
+
+In PROD mode:
+- frontend is available at `http://<raspberry-ip>:3000`
+- backend is available at `http://<raspberry-ip>:4000`
+- kiosk service runs on the Raspberry Pi host via `pixflow-kiosk.service`
+- Docker player is disabled by default because Raspberry Pi OS Lite has no X server inside Docker
+
+## DEV installation (Proxmox / server)
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+Choose:
+- `1) Dev (server / Proxmox)`
+
+DEV mode starts only `frontend` + `backend`.
+
+## Optional Docker player
+If you explicitly want the previous containerized player:
+
+```bash
+docker compose --profile docker-player up -d --build
+```
 
 ## Data layout (persistent volume)
 ```txt
@@ -19,69 +75,25 @@ Production-ready, fully offline digital signage stack with Docker Compose.
   playlist.json
 ```
 
-## Folder structure
-```txt
-.
-├── backend/
-├── frontend/
-├── player/
-├── system/
-├── scripts/
-├── docker-compose.yml
-└── logo.png
-```
+## Troubleshooting
 
-## Install PixFlow
+### Check containers
 ```bash
-chmod +x install.sh
-./install.sh
+docker ps
+docker compose logs -f
 ```
 
-## Quick start
+### Check kiosk service
 ```bash
-docker compose build
-docker compose up -d
+systemctl status pixflow-kiosk
+journalctl -u pixflow-kiosk -f
 ```
 
-Then open:
-- Admin UI: `http://<pi-ip>:3000`
-- API: `http://<pi-ip>:4000`
-
-## API endpoints
-- `GET /projects`
-- `POST /projects`
-- `PATCH /projects/:id/active`
-- `GET /media?projectId=<id>`
-- `POST /media/upload` (multipart: file, projectId, duration)
-- `PATCH /media/:id/active`
-- `DELETE /media/:id`
-- `GET /playlist`
-
-## Real-time playlist behavior
-Any project/media activation or upload triggers immediate regeneration of `/data/playlist.json` and player polling detects changes within 5 seconds, without container restart.
-
-## Player design
-- No VLC CLI
-- HTML5 rendering for videos/images
-- Fullscreen Chromium kiosk
-- Smooth fade transition
-- Safe fallback when media is empty
-
-## Hotspot mode (offline)
-Configured in `system` service:
-- SSID: `EVENT_WIFI`
-- Gateway: `192.168.4.1`
-
-You can alternatively run host-native setup:
+### Check Wi-Fi/rfkill state
 ```bash
-./scripts/setup-hotspot-host.sh wlan0 EVENT_WIFI eventwifi123
+rfkill list
+ip link
+sudo rfkill unblock wifi
 ```
 
-## Notes for Raspberry Pi 4 (64-bit)
-- Install Raspberry Pi OS Lite 64-bit or Desktop 64-bit.
-- Install Docker + Compose plugin.
-- If player cannot access X display, run on host once:
-  ```bash
-  xhost +local:docker
-  ```
-- For pure headless framebuffer deployments, replace kiosk launch with a Wayland/Weston container profile.
+If the hotspot container reports that `wlan0` is missing, ensure your Raspberry Pi hardware exposes Wi-Fi and that rfkill is unblocked before starting PROD mode.
