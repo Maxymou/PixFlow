@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
+
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 echo "=============================="
 echo "     PixFlow Installer"
 echo "=============================="
 
 # Detect Raspberry Pi
-if cat /sys/firmware/devicetree/base/model 2>/dev/null | grep -qi "raspberry"; then
+if tr -d '\0' </sys/firmware/devicetree/base/model 2>/dev/null | grep -qi "raspberry"; then
   DEFAULT_MODE="prod"
 else
   DEFAULT_MODE="dev"
@@ -21,7 +23,7 @@ echo "1) Dev (server / Proxmox)"
 echo "2) Prod (Raspberry Pi)"
 echo ""
 
-read -p "Your choice [Enter = $DEFAULT_MODE]: " CHOICE
+read -r -p "Your choice [Enter = $DEFAULT_MODE]: " CHOICE
 
 # Interpret choice
 if [ "$CHOICE" = "1" ]; then
@@ -36,9 +38,20 @@ echo ""
 echo "Selected mode: $MODE"
 echo ""
 
-# Launch Docker
 if [ "$MODE" = "prod" ]; then
+  read -r -p "Install Raspberry kiosk display service? [Y/n] " INSTALL_KIOSK
+  INSTALL_KIOSK=${INSTALL_KIOSK:-Y}
+
   docker compose --profile prod up -d --build
+
+  case "$INSTALL_KIOSK" in
+    [Yy]|[Yy][Ee][Ss])
+      sudo bash "$ROOT_DIR/scripts/setup-raspberry-kiosk.sh"
+      ;;
+    *)
+      echo "Skipping Raspberry kiosk setup."
+      ;;
+  esac
 else
   docker compose up -d --build
 fi
