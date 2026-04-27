@@ -1,28 +1,30 @@
-# Raspberry Pi kiosk setup
+# Raspberry Pi / Debian Trixie kiosk setup
 
-This guide configures PixFlow to launch Chromium directly on the player route and keeps the screen awake.
+This guide configures PixFlow kiosk mode for Debian Trixie / Raspberry Pi OS Lite using `startx`, so Chromium can run even when no desktop environment is installed.
 
 ## Prerequisites
 
-Run on Raspberry Pi OS:
+On Debian Trixie / Raspberry Pi OS Trixie, install `chromium` (not `chromium-browser`):
 
 ```bash
 sudo apt update
-sudo apt install -y x11-xserver-utils unclutter chromium-browser
+sudo apt install -y \
+  xserver-xorg \
+  x11-xserver-utils \
+  xinit \
+  openbox \
+  chromium \
+  unclutter
 ```
 
-If `chromium-browser` is unavailable on your image:
+## Install kiosk files and service
 
 ```bash
-sudo apt install -y chromium
-```
+cd /home/maxymou/PixFlow
 
-## Install kiosk launcher and service
+cp systemd/xinitrc /home/maxymou/.xinitrc
+chmod +x /home/maxymou/.xinitrc
 
-From the PixFlow repository root:
-
-```bash
-chmod +x scripts/start-kiosk.sh
 sudo cp systemd/pixflow-kiosk.service /etc/systemd/system/pixflow-kiosk.service
 sudo systemctl daemon-reload
 sudo systemctl enable pixflow-kiosk
@@ -31,17 +33,56 @@ sudo systemctl restart pixflow-kiosk
 
 The default URL is `http://127.0.0.1:3000/player`.
 
-## Optional automated setup script
-
-You can also run:
+## Service verification
 
 ```bash
-sudo bash scripts/setup-raspberry-kiosk.sh
+systemctl status pixflow-kiosk --no-pager -l
+sudo journalctl -u pixflow-kiosk -n 80 --no-pager
 ```
 
-## Debug commands
+## PixFlow verification
 
 ```bash
-systemctl status pixflow-kiosk
-journalctl -u pixflow-kiosk -f
+cd /home/maxymou/PixFlow
+docker compose ps
+curl -I http://127.0.0.1:3000/player
+```
+
+## Troubleshooting
+
+### Error: Missing X server or $DISPLAY
+
+Cause: Chromium is started without a running X server.
+
+Fix: use the `pixflow-kiosk.service` service based on `startx`.
+
+### Error: `PixFlow/PixFlow` path in service
+
+Cause: invalid `ExecStart` path.
+
+Fix: recopy the service from this repository:
+
+```bash
+sudo cp systemd/pixflow-kiosk.service /etc/systemd/system/pixflow-kiosk.service
+sudo systemctl daemon-reload
+sudo systemctl restart pixflow-kiosk
+```
+
+### Error: Only console users are allowed to run the X server
+
+```bash
+sudo nano /etc/X11/Xwrapper.config
+```
+
+Content:
+
+```ini
+allowed_users=anybody
+needs_root_rights=yes
+```
+
+Then restart:
+
+```bash
+sudo systemctl restart pixflow-kiosk
 ```
