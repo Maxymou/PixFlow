@@ -1,7 +1,10 @@
 FROM node:20-bookworm-slim
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/* \
+  && npm install --omit=dev
 COPY src ./src
 ENV PORT=4000
 EXPOSE 4000
