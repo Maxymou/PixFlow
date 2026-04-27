@@ -14,7 +14,8 @@ sudo apt install -y \
   xinit \
   openbox \
   chromium \
-  unclutter
+  unclutter \
+  curl
 ```
 
 ## Install kiosk files and service
@@ -86,3 +87,22 @@ Then restart:
 ```bash
 sudo systemctl restart pixflow-kiosk
 ```
+
+
+### Kiosk does not start after reboot
+
+The kiosk service waits for the PixFlow frontend before launching Chromium.
+
+Check logs:
+
+```bash
+sudo journalctl -u pixflow-kiosk -n 100 --no-pager
+```
+
+Check frontend:
+
+```bash
+curl -I http://127.0.0.1:3000/player
+docker compose ps
+```
+

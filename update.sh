@@ -86,8 +86,8 @@ sudo systemctl enable pixflow-kiosk
 echo "[6/7] Restart kiosk service..."
 sudo systemctl restart pixflow-kiosk || true
 
-echo "[6.5/7] Validate installed ExecStart..."
-sudo systemctl cat pixflow-kiosk | grep ExecStart
+echo "[6.5/7] Validate installed service entries..."
+sudo systemctl cat pixflow-kiosk | grep -E "ExecStart|ExecStartPre|PIXFLOW_KIOSK_URL"
 
 echo "[7/7] Status..."
 if [ "$KIOSK_ONLY" -eq 0 ]; then
