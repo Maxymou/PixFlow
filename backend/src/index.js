@@ -95,7 +95,44 @@ const mediaTypeFromName = (filename, mimetype = '') => {
   return VIDEO_EXTENSIONS.has(ext) ? 'video' : 'image';
 };
 
-const runFfmpeg = (inputPath, outputPath) => new Promise((resolve, reject) => {
+const toHmsSeconds = (value) => {
+  const [hours, minutes, seconds] = String(value).split(':');
+  const h = Number(hours || 0);
+  const m = Number(minutes || 0);
+  const s = Number(seconds || 0);
+  return (h * 3600) + (m * 60) + s;
+};
+
+const ffprobeDuration = (inputPath) => new Promise((resolve, reject) => {
+  let stdout = '';
+  let stderr = '';
+  const probe = spawn('ffprobe', [
+    '-v', 'error',
+    '-show_entries', 'format=duration',
+    '-of', 'default=noprint_wrappers=1:nokey=1',
+    inputPath,
+  ]);
+
+  probe.stdout.on('data', (chunk) => {
+    stdout += chunk.toString();
+  });
+
+  probe.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+
+  probe.on('error', reject);
+  probe.on('close', (code) => {
+    if (code !== 0) {
+      reject(new Error(`ffprobe exited with code ${code}: ${stderr}`));
+      return;
+    }
+    const duration = Number.parseFloat(stdout.trim());
+    resolve(Number.isFinite(duration) && duration > 0 ? duration : null);
+  });
+});
+
+const runFfmpeg = (inputPath, outputPath, { onProgress } = {}) => new Promise((resolve, reject) => {
   let stderr = '';
   const ffmpeg = spawn('ffmpeg', [
     '-y',
@@ -117,23 +154,103 @@ const runFfmpeg = (inputPath, outputPath) => new Promise((resolve, reject) => {
   ffmpeg.stderr.on('data', (data) => {
     const text = data.toString();
     stderr += text;
-    console.log(`[ffmpeg] ${text}`);
+    const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+    for (const line of lines) {
+      console.log(`[ffmpeg] ${line}`);
+      if (onProgress) onProgress(line);
+    }
   });
 
   ffmpeg.on('error', reject);
-
   ffmpeg.on('close', (code) => {
     if (code === 0) resolve();
     else reject(new Error(`ffmpeg exited with code ${code}: ${stderr}`));
   });
 });
 
+const normalizeMedia = (item) => ({
+  ...item,
+  status: item.status || 'ready',
+  progress: item.progress ?? 100,
+});
+
+const updateMediaItem = async (mediaId, updater) => {
+  const media = await readJson(mediaFile);
+  const item = media.find((entry) => entry.id === mediaId);
+  if (!item) return null;
+  updater(item);
+  await writeJson(mediaFile, media);
+  return item;
+};
+
+const processVideoInBackground = async (mediaId, inputPath, outputPath, finalName) => {
+  let durationSeconds = null;
+  try {
+    durationSeconds = await ffprobeDuration(inputPath);
+  } catch (error) {
+    console.warn('ffprobe failed, conversion progress will be approximate:', error.message);
+  }
+
+  let lastStoredProgress = 0;
+  let lastStoredAt = 0;
+  const storeProgress = async (progress) => {
+    const bounded = Math.min(99, Math.max(0, Number(progress) || 0));
+    const now = Date.now();
+    if (bounded <= lastStoredProgress && now - lastStoredAt < 1_500) return;
+    lastStoredProgress = bounded;
+    lastStoredAt = now;
+    await updateMediaItem(mediaId, (item) => {
+      item.progress = bounded;
+      item.status = 'processing';
+      item.error = null;
+    });
+  };
+
+  try {
+    await runFfmpeg(inputPath, outputPath, {
+      onProgress: (line) => {
+        const match = line.match(/time=(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/);
+        if (!match || !durationSeconds) return;
+        const current = toHmsSeconds(match[1]);
+        const percent = Math.round((current / durationSeconds) * 100);
+        storeProgress(percent).catch((error) => {
+          console.warn('failed to persist ffmpeg progress:', error.message);
+        });
+      },
+    });
+
+    await updateMediaItem(mediaId, (item) => {
+      item.file = finalName;
+      item.status = 'ready';
+      item.progress = 100;
+      item.error = null;
+      item.incomingFile = null;
+      item.sourceFile = null;
+    });
+
+    await fs.rm(inputPath, { force: true });
+    await buildPlaylist();
+  } catch (error) {
+    await fs.rm(outputPath, { force: true });
+    await updateMediaItem(mediaId, (item) => {
+      item.status = 'failed';
+      item.progress = Math.max(item.progress ?? 0, 1);
+      item.error = error.message;
+    });
+    await buildPlaylist();
+    throw error;
+  }
+};
+
 const buildPlaylist = async () => {
   const projects = await readJson(projectsFile);
   const media = await readJson(mediaFile);
   const activeProjectIds = new Set(projects.filter((p) => p.active).map((p) => p.id));
   const playlist = media
-    .filter((m) => m.active && activeProjectIds.has(m.projectId))
+    .filter((m) => {
+      const status = m.status || 'ready';
+      return m.active && status === 'ready' && m.file && activeProjectIds.has(m.projectId);
+    })
     .map((m) => ({
       type: m.type,
       file: `/media/${m.file}`,
@@ -200,7 +317,9 @@ app.delete('/projects/:id', async (req, res, next) => {
     media = media.filter((m) => m.projectId !== req.params.id);
     await writeJson(mediaFile, media);
     for (const item of orphaned) {
-      await fs.rm(path.join(mediaDir, item.file), { force: true });
+      if (item.file) await fs.rm(path.join(mediaDir, item.file), { force: true });
+      if (item.incomingFile) await fs.rm(path.join(incomingDir, item.incomingFile), { force: true });
+      if (item.sourceFile) await fs.rm(path.join(incomingDir, item.sourceFile), { force: true });
     }
 
     await buildPlaylist();
@@ -212,7 +331,7 @@ app.get('/media', async (req, res, next) => {
   try {
     const media = await readJson(mediaFile);
     const filtered = req.query.projectId ? media.filter((m) => m.projectId === req.query.projectId) : media;
-    res.json(filtered);
+    res.json(filtered.map(normalizeMedia));
   } catch (error) { next(error); }
 });
 
@@ -226,40 +345,41 @@ app.post('/media/upload', upload.single('file'), async (req, res, next) => {
     const inputPath = path.join(incomingDir, req.file.filename);
     const isVideo = mediaTypeFromName(req.file.originalname, req.file.mimetype) === 'video';
 
-    let finalName;
-
-    try {
-      if (isVideo) {
-        finalName = `${nanoid()}-${path.basename(req.file.filename, path.extname(req.file.filename))}.mp4`;
-        const outputPath = path.join(mediaDir, finalName);
-        await runFfmpeg(inputPath, outputPath);
-        await fs.rm(inputPath, { force: true });
-      } else {
-        finalName = `${nanoid()}-${req.file.filename}`;
-        await fs.rename(inputPath, path.join(mediaDir, finalName));
-      }
-    } catch (error) {
-      await fs.rm(inputPath, { force: true });
-      console.error('media processing failed:', error);
-      return res.status(500).json({
-        error: isVideo ? 'video conversion failed' : 'media processing failed',
-        details: error.message,
-      });
-    }
-
     const item = {
       id: nanoid(),
       projectId,
       type: isVideo ? 'video' : 'image',
-      file: finalName,
+      file: null,
       active: true,
       duration: Number(duration || 5),
+      status: isVideo ? 'processing' : 'ready',
+      progress: isVideo ? 0 : 100,
+      error: null,
+      incomingFile: isVideo ? req.file.filename : null,
+      sourceFile: isVideo ? req.file.filename : null,
     };
 
+    if (isVideo) {
+      const finalName = `${nanoid()}-${path.basename(req.file.filename, path.extname(req.file.filename))}.mp4`;
+      const outputPath = path.join(mediaDir, finalName);
+      item.file = finalName;
+      media.push(item);
+      await writeJson(mediaFile, media);
+      await buildPlaylist();
+      processVideoInBackground(item.id, inputPath, outputPath, finalName)
+        .catch((error) => console.error('background video processing crashed:', error));
+      return res.status(201).json(normalizeMedia(item));
+    }
+
+    const finalName = `${nanoid()}-${req.file.filename}`;
+    await fs.rename(inputPath, path.join(mediaDir, finalName));
+    item.file = finalName;
+    item.incomingFile = null;
+    item.sourceFile = null;
     media.push(item);
     await writeJson(mediaFile, media);
     await buildPlaylist();
-    res.status(201).json(item);
+    res.status(201).json(normalizeMedia(item));
   } catch (error) { next(error); }
 });
 
@@ -268,10 +388,14 @@ app.patch('/media/:id/active', async (req, res, next) => {
     const media = await readJson(mediaFile);
     const item = media.find((m) => m.id === req.params.id);
     if (!item) return res.status(404).json({ error: 'media not found' });
+    const status = item.status || 'ready';
+    if (req.body.active && status !== 'ready') {
+      return res.status(400).json({ error: 'media is not ready' });
+    }
     item.active = Boolean(req.body.active);
     await writeJson(mediaFile, media);
     await buildPlaylist();
-    res.json(item);
+    res.json(normalizeMedia(item));
   } catch (error) { next(error); }
 });
 
@@ -281,10 +405,16 @@ app.patch('/media/:id', async (req, res, next) => {
     const item = media.find((m) => m.id === req.params.id);
     if (!item) return res.status(404).json({ error: 'media not found' });
     if (req.body.duration !== undefined) item.duration = Number(req.body.duration);
-    if (req.body.active !== undefined) item.active = Boolean(req.body.active);
+    if (req.body.active !== undefined) {
+      const status = item.status || 'ready';
+      if (req.body.active && status !== 'ready') {
+        return res.status(400).json({ error: 'media is not ready' });
+      }
+      item.active = Boolean(req.body.active);
+    }
     await writeJson(mediaFile, media);
     await buildPlaylist();
-    res.json(item);
+    res.json(normalizeMedia(item));
   } catch (error) { next(error); }
 });
 
@@ -295,7 +425,9 @@ app.delete('/media/:id', async (req, res, next) => {
     if (idx < 0) return res.status(404).json({ error: 'media not found' });
     const [item] = media.splice(idx, 1);
     await writeJson(mediaFile, media);
-    await fs.rm(path.join(mediaDir, item.file), { force: true });
+    if (item.file) await fs.rm(path.join(mediaDir, item.file), { force: true });
+    if (item.incomingFile) await fs.rm(path.join(incomingDir, item.incomingFile), { force: true });
+    if (item.sourceFile) await fs.rm(path.join(incomingDir, item.sourceFile), { force: true });
     await buildPlaylist();
     res.status(204).send();
   } catch (error) { next(error); }

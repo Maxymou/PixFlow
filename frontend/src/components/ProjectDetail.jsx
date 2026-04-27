@@ -8,6 +8,8 @@ export function ProjectDetail({ projects, onRefresh }) {
   const [duration, setDuration] = useState(5);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadFileName, setUploadFileName] = useState('');
   const [uploadError, setUploadError] = useState('');
   const fileRef = useRef(null);
 
@@ -20,40 +22,66 @@ export function ProjectDetail({ projects, onRefresh }) {
 
   useEffect(() => { loadMedia(); }, [loadMedia]);
 
+  const hasProcessingMedia = useMemo(
+    () => media.some((item) => (item.status || 'ready') === 'processing'),
+    [media],
+  );
+
+  useEffect(() => {
+    if (!hasProcessingMedia) return undefined;
+    const timer = setInterval(() => {
+      loadMedia();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [hasProcessingMedia, loadMedia]);
+
   const upload = useCallback(
     async (files) => {
       const file = files?.[0];
       if (!file || uploading) return;
       setUploading(true);
+      setUploadFileName(file.name || '');
+      setUploadProgress(0);
       setUploadError('');
       try {
         const form = new FormData();
         form.append('file', file);
         form.append('projectId', id);
         form.append('duration', duration);
-        const res = await fetch(`${API_BASE}/api/media/upload`, { method: 'POST', body: form });
-        if (!res.ok) {
-          if (res.status === 413) {
-            throw new Error('Fichier trop volumineux. La limite actuelle est de 500 MB.');
-          }
+        await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', `${API_BASE}/api/media/upload`);
+          xhr.responseType = 'json';
 
-          const contentType = res.headers.get('content-type') || '';
-          if (contentType.includes('application/json')) {
-            const payload = await res.json();
-            throw new Error(payload.error || 'Upload failed');
-          }
+          xhr.upload.onprogress = (event) => {
+            if (!event.lengthComputable) return;
+            const percent = Math.round((event.loaded / event.total) * 100);
+            setUploadProgress(percent);
+          };
 
-          const message = await res.text();
-          if (message.toLowerCase().includes('<html')) {
-            throw new Error(`Erreur serveur pendant l’upload (${res.status}).`);
-          }
+          xhr.onload = () => {
+            const payload = xhr.response || {};
+            if (xhr.status >= 200 && xhr.status < 300) {
+              setUploadProgress(100);
+              resolve(payload);
+              return;
+            }
+            if (xhr.status === 413) {
+              reject(new Error('Fichier trop volumineux. La limite actuelle est de 500 MB.'));
+              return;
+            }
+            reject(new Error(payload.error || `Erreur serveur pendant l’upload (${xhr.status}).`));
+          };
 
-          throw new Error(message || 'Upload failed');
-        }
+          xhr.onerror = () => reject(new Error('Erreur réseau pendant l’upload.'));
+          xhr.send(form);
+        });
         await loadMedia();
       } catch (error) {
         setUploadError(error.message || 'Upload failed');
       } finally {
+        setUploadProgress(0);
+        setUploadFileName('');
         setUploading(false);
       }
     },
@@ -69,7 +97,8 @@ export function ProjectDetail({ projects, onRefresh }) {
   };
 
   const remove = async (item) => {
-    if (!confirm(`Delete "${item.file}"?`)) return;
+    const label = item.file || item.sourceFile || item.id;
+    if (!confirm(`Delete "${label}"?`)) return;
     await api(`/api/media/${item.id}`, { method: 'DELETE' });
     loadMedia();
   };
@@ -82,7 +111,7 @@ export function ProjectDetail({ projects, onRefresh }) {
     loadMedia();
   };
 
-  const activeCount = media.filter((m) => m.active).length;
+  const activeCount = media.filter((m) => m.active && (m.status || 'ready') === 'ready').length;
 
   return (
     <div className="animate-slide-up space-y-5">
@@ -143,6 +172,24 @@ export function ProjectDetail({ projects, onRefresh }) {
           <p className="mt-2 text-sm text-rose-400">{uploadError}</p>
         )}
 
+        {uploading && (
+          <div className="mt-4">
+            <div className="mb-1 flex justify-between text-xs text-slate-400">
+              <span>Upload en cours…</span>
+              <span>{uploadProgress}%</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+              <div
+                className="h-full rounded-full bg-cyan-400 transition-all"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+            {uploadFileName && (
+              <p className="mt-1 truncate text-xs text-slate-500">{uploadFileName}</p>
+            )}
+          </div>
+        )}
+
         <div
           className="mt-5 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/80 px-3 py-2"
           onClick={(e) => e.stopPropagation()}
@@ -188,7 +235,10 @@ export function ProjectDetail({ projects, onRefresh }) {
 function MediaRow({ item, onToggle, onRemove, onDurationChange }) {
   const [editingDur, setEditingDur] = useState(false);
   const [dur, setDur] = useState(item.duration ?? 5);
-  const previewUrl = `${API_BASE}/media/${item.file}`;
+  const status = item.status || 'ready';
+  const isReady = status === 'ready';
+  const previewUrl = item.file ? `${API_BASE}/media/${item.file}` : '';
+  const fileLabel = item.file || item.sourceFile || 'pending';
 
   const saveDuration = () => {
     onDurationChange(item, dur);
@@ -198,7 +248,7 @@ function MediaRow({ item, onToggle, onRemove, onDurationChange }) {
   return (
     <li
       className={`card-interactive flex items-center gap-3 ${
-        !item.active ? 'opacity-50' : ''
+        !item.active || !isReady ? 'opacity-50' : ''
       }`}
     >
       <div className="h-12 w-16 flex-shrink-0 overflow-hidden rounded-lg bg-slate-800">
@@ -219,9 +269,9 @@ function MediaRow({ item, onToggle, onRemove, onDurationChange }) {
       <div className="min-w-0 flex-1">
         <p
           className="truncate text-sm font-medium text-slate-200"
-          title={item.file}
+          title={fileLabel}
         >
-          {item.file}
+          {fileLabel}
         </p>
         <div className="mt-0.5 flex items-center gap-2">
           <span className="text-xs capitalize text-slate-500">{item.type}</span>
@@ -257,15 +307,42 @@ function MediaRow({ item, onToggle, onRemove, onDurationChange }) {
             </span>
           )}
 
-          <span className={item.active ? 'badge-active' : 'badge-inactive'}>
-            {item.active ? 'Active' : 'Inactive'}
+          <span className={item.active && isReady ? 'badge-active' : 'badge-inactive'}>
+            {item.active && isReady ? 'Active' : 'Inactive'}
           </span>
+          {status === 'processing' && (
+            <span className="text-xs text-amber-300">Conversion en cours…</span>
+          )}
+          {status === 'failed' && (
+            <span className="text-xs text-rose-400">Conversion échouée</span>
+          )}
         </div>
+        {item.type === 'video' && status === 'processing' && (
+          <div className="mt-2">
+            <div className="mb-1 flex justify-between text-xs text-amber-300">
+              <span>Conversion en cours…</span>
+              <span>{item.progress ?? 0}%</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+              <div
+                className="h-full rounded-full bg-amber-400 transition-all"
+                style={{ width: `${item.progress ?? 0}%` }}
+              />
+            </div>
+          </div>
+        )}
+        {status === 'failed' && item.error && (
+          <p className="mt-1 text-xs text-rose-300">{item.error}</p>
+        )}
       </div>
 
       <div className="flex flex-shrink-0 items-center gap-1.5">
-        <button onClick={() => onToggle(item)} className="btn-ghost">
-          {item.active ? 'Pause' : 'Enable'}
+        <button
+          disabled={!isReady}
+          onClick={() => isReady && onToggle(item)}
+          className="btn-ghost disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {!isReady ? 'Processing' : item.active ? 'Pause' : 'Enable'}
         </button>
         <button onClick={() => onRemove(item)} className="btn-danger" title="Delete">
           ✕
