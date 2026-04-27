@@ -36,7 +36,24 @@ fi
 
 echo "Installing Raspberry kiosk dependencies..."
 apt-get update
-apt-get install -y x11-xserver-utils unclutter chromium-browser || apt-get install -y x11-xserver-utils unclutter chromium
+apt-get install -y \
+  xserver-xorg \
+  x11-xserver-utils \
+  xinit \
+  openbox \
+  chromium \
+  unclutter \
+  curl || apt-get install -y \
+  xserver-xorg \
+  x11-xserver-utils \
+  xinit \
+  openbox \
+  chromium-browser \
+  unclutter \
+  curl
+
+echo "Ensuring repository scripts are executable..."
+chmod +x "${REPO_DIR}/scripts/"*.sh || true
 
 echo "Installing kiosk xinitrc from template..."
 install -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${XINITRC_TEMPLATE}" "${TARGET_HOME}/.xinitrc"
@@ -54,7 +71,7 @@ systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}"
 systemctl restart "${SERVICE_NAME}"
 
-echo "Installed ExecStart:"
-systemctl cat "${SERVICE_NAME}" | grep ExecStart || true
+echo "Installed service entries:"
+systemctl cat "${SERVICE_NAME}" | grep -E "ExecStart|ExecStartPre|PIXFLOW_KIOSK_URL" || true
 
 echo "Kiosk service installed and started: ${SERVICE_NAME}"
