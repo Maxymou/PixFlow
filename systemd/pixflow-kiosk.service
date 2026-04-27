@@ -1,0 +1,17 @@
+[Unit]
+Description=PixFlow Chromium Kiosk
+After=graphical.target docker.service
+Wants=graphical.target
+
+[Service]
+Type=simple
+User=maxymou
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/maxymou/.Xauthority
+Environment=PIXFLOW_KIOSK_URL=http://127.0.0.1:3000/player
+ExecStart=/home/maxymou/PixFlow/scripts/start-kiosk.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

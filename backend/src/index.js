@@ -4,6 +4,7 @@ import multer from 'multer';
 import { nanoid } from 'nanoid';
 import fs from 'fs/promises';
 import path from 'path';
+import { spawn } from 'child_process';
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -16,9 +17,19 @@ const mediaFile = path.join(projectsDir, 'media.json');
 const playlistFile = path.join(dataRoot, 'playlist.json');
 const settingsFile = path.join(dataRoot, 'settings.json');
 
-const MAX_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
+const DEFAULT_MAX_UPLOAD_SIZE_BYTES = 500 * 1024 * 1024;
+const MAX_UPLOAD_SIZE_BYTES = Number(process.env.MAX_UPLOAD_SIZE_BYTES || DEFAULT_MAX_UPLOAD_SIZE_BYTES);
 const MAX_MEDIA_FILES = Number(process.env.MAX_MEDIA_FILES || 2000);
-const ALLOWED_UPLOAD_TYPES = new Set(['image/jpeg', 'image/png', 'video/mp4']);
+const ALLOWED_UPLOAD_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'video/mp4',
+  'video/x-msvideo',
+  'video/avi',
+  'application/octet-stream',
+]);
+const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.mp4', '.avi']);
 
 app.use(cors());
 app.use(express.json());
@@ -34,11 +45,22 @@ const storage = multer.diskStorage({
   },
 });
 
+const isAllowedUpload = (file) => {
+  const ext = path.extname(file.originalname || '').toLowerCase();
+  if (!ALLOWED_EXTENSIONS.has(ext)) return false;
+
+  if (file.mimetype.startsWith('image/')) return true;
+  if (file.mimetype.startsWith('video/')) return true;
+  if (ext === '.avi' && file.mimetype === 'application/octet-stream') return true;
+
+  return ALLOWED_UPLOAD_TYPES.has(file.mimetype) && ext === '.avi';
+};
+
 const upload = multer({
   storage,
   limits: { fileSize: MAX_UPLOAD_SIZE_BYTES },
   fileFilter: (_req, file, cb) => {
-    if (!ALLOWED_UPLOAD_TYPES.has(file.mimetype)) {
+    if (!isAllowedUpload(file)) {
       cb(new Error('unsupported file type'));
       return;
     }
@@ -66,8 +88,32 @@ const mediaTypeFromName = (filename, mimetype = '') => {
   if (mimetype.startsWith('video/')) return 'video';
   if (mimetype.startsWith('image/')) return 'image';
   const ext = path.extname(filename).toLowerCase();
-  return ['.mp4', '.mov', '.mkv', '.webm'].includes(ext) ? 'video' : 'image';
+  return ['.avi', '.mp4', '.mov', '.mkv', '.webm'].includes(ext) ? 'video' : 'image';
 };
+
+const runFfmpeg = (inputPath, outputPath) => new Promise((resolve, reject) => {
+  const ffmpeg = spawn('ffmpeg', [
+    '-y',
+    '-i', inputPath,
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
+    '-crf', '23',
+    '-c:a', 'aac',
+    '-movflags', '+faststart',
+    outputPath,
+  ]);
+
+  ffmpeg.stderr.on('data', (data) => {
+    console.log(`[ffmpeg] ${data}`);
+  });
+
+  ffmpeg.on('error', reject);
+
+  ffmpeg.on('close', (code) => {
+    if (code === 0) resolve();
+    else reject(new Error(`ffmpeg exited with code ${code}`));
+  });
+});
 
 const buildPlaylist = async () => {
   const projects = await readJson(projectsFile);
@@ -164,13 +210,33 @@ app.post('/media/upload', upload.single('file'), async (req, res, next) => {
     await ensureMediaCapacity();
 
     const media = await readJson(mediaFile);
-    const finalName = `${nanoid()}-${req.file.filename}`;
-    await fs.rename(path.join(incomingDir, req.file.filename), path.join(mediaDir, finalName));
+    const originalExt = path.extname(req.file.originalname).toLowerCase();
+    const isAvi = originalExt === '.avi';
+    const inputPath = path.join(incomingDir, req.file.filename);
+
+    let finalName = `${nanoid()}-${req.file.filename}`;
+
+    try {
+      if (isAvi) {
+        finalName = `${nanoid()}-${path.basename(req.file.filename, path.extname(req.file.filename))}.mp4`;
+        const outputPath = path.join(mediaDir, finalName);
+        await runFfmpeg(inputPath, outputPath);
+        await fs.rm(inputPath, { force: true });
+      } else {
+        await fs.rename(inputPath, path.join(mediaDir, finalName));
+      }
+    } catch (error) {
+      await fs.rm(inputPath, { force: true });
+      if (isAvi) {
+        return res.status(500).json({ error: 'video conversion failed' });
+      }
+      throw error;
+    }
 
     const item = {
       id: nanoid(),
       projectId,
-      type: mediaTypeFromName(req.file.originalname, req.file.mimetype),
+      type: mediaTypeFromName(finalName, req.file.mimetype),
       file: finalName,
       active: true,
       duration: Number(duration || 5),
@@ -284,12 +350,13 @@ app.patch('/settings/wifi', async (req, res, next) => {
 app.use((error, _req, res, _next) => {
   if (error instanceof multer.MulterError) {
     if (error.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ error: 'file too large (max 100MB)' });
+      const maxSizeMb = Math.round(MAX_UPLOAD_SIZE_BYTES / (1024 * 1024));
+      return res.status(400).json({ error: `file too large (max ${maxSizeMb}MB)` });
     }
     return res.status(400).json({ error: error.message });
   }
   if (error.message === 'unsupported file type') {
-    return res.status(400).json({ error: 'unsupported file type. allowed: image/jpeg, image/png, video/mp4' });
+    return res.status(400).json({ error: 'unsupported file type. allowed extensions: .jpg, .jpeg, .png, .webp, .mp4, .avi' });
   }
   if (error.status) {
     return res.status(error.status).json({ error: error.message });

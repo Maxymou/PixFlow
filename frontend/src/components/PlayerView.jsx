@@ -10,6 +10,7 @@ export function PlayerView() {
   const [status, setStatus] = useState('loading');
   const [failedMedia, setFailedMedia] = useState({});
   const retryTimeoutRef = useRef(null);
+  const videoRef = useRef(null);
 
   const clearRetry = useCallback(() => {
     if (retryTimeoutRef.current) {
@@ -93,6 +94,23 @@ export function PlayerView() {
     return `${API_BASE}/media/${currentItem.file}`;
   }, [currentItem]);
 
+  useEffect(() => {
+    if (currentItem?.type !== 'video') return;
+
+    const video = videoRef.current;
+    if (!video) return;
+
+    video.muted = true;
+    video.playsInline = true;
+
+    const playPromise = video.play();
+    if (playPromise?.catch) {
+      playPromise.catch((error) => {
+        console.warn('Video autoplay failed:', error);
+      });
+    }
+  }, [currentItem, currentUrl]);
+
   const nextUrl = useMemo(() => {
     if (activePlaylist.length < 2) return null;
     const nextItem = activePlaylist[(index + 1) % activePlaylist.length];
@@ -130,15 +148,26 @@ export function PlayerView() {
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-black">
+    <div className="flex h-screen w-screen items-center justify-center overflow-hidden bg-black">
       {currentItem.type === 'video' ? (
         <video
+          ref={videoRef}
           key={`${index}-${currentItem.file}`}
           src={currentUrl}
-          className="h-full w-full object-contain"
+          className="max-h-full max-w-full object-contain"
           autoPlay
           muted
           playsInline
+          preload="auto"
+          controls={false}
+          onCanPlay={() => {
+            const playPromise = videoRef.current?.play();
+            if (playPromise?.catch) {
+              playPromise.catch((error) => {
+                console.warn('Video autoplay failed:', error);
+              });
+            }
+          }}
           onEnded={next}
           onError={markCurrentFailed}
         />
@@ -147,7 +176,7 @@ export function PlayerView() {
           key={`${index}-${currentItem.file}`}
           src={currentUrl}
           alt=""
-          className="h-full w-full object-contain"
+          className="max-h-full max-w-full object-contain"
           draggable={false}
           onError={markCurrentFailed}
         />
