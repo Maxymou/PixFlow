@@ -33,7 +33,21 @@ export function ProjectDetail({ projects, onRefresh }) {
         form.append('duration', duration);
         const res = await fetch(`${API_BASE}/api/media/upload`, { method: 'POST', body: form });
         if (!res.ok) {
+          if (res.status === 413) {
+            throw new Error('Fichier trop volumineux. La limite actuelle est de 500 MB.');
+          }
+
+          const contentType = res.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const payload = await res.json();
+            throw new Error(payload.error || 'Upload failed');
+          }
+
           const message = await res.text();
+          if (message.toLowerCase().includes('<html')) {
+            throw new Error(`Erreur serveur pendant l’upload (${res.status}).`);
+          }
+
           throw new Error(message || 'Upload failed');
         }
         await loadMedia();
