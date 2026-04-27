@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
+import { ToggleSwitch } from './ToggleSwitch';
 
 export function Dashboard({ projects, onRefresh }) {
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [busyProjectIds, setBusyProjectIds] = useState(new Set());
 
   const activeCount = projects.filter((p) => p.active).length;
   const inactiveCount = projects.length - activeCount;
@@ -23,11 +25,22 @@ export function Dashboard({ projects, onRefresh }) {
   };
 
   const toggleProject = async (project) => {
-    await api(`/api/projects/${project.id}/active`, {
-      method: 'PATCH',
-      body: JSON.stringify({ active: !project.active }),
-    });
-    onRefresh();
+    if (busyProjectIds.has(project.id)) return;
+
+    setBusyProjectIds((prev) => new Set(prev).add(project.id));
+    try {
+      await api(`/api/projects/${project.id}/active`, {
+        method: 'PATCH',
+        body: JSON.stringify({ active: !project.active }),
+      });
+      await onRefresh();
+    } finally {
+      setBusyProjectIds((prev) => {
+        const next = new Set(prev);
+        next.delete(project.id);
+        return next;
+      });
+    }
   };
 
   const deleteProject = async (project) => {
@@ -93,6 +106,7 @@ export function Dashboard({ projects, onRefresh }) {
               <ProjectRow
                 key={p.id}
                 project={p}
+                isToggling={busyProjectIds.has(p.id)}
                 onToggle={toggleProject}
                 onDelete={deleteProject}
               />
@@ -104,7 +118,7 @@ export function Dashboard({ projects, onRefresh }) {
   );
 }
 
-function ProjectRow({ project, onToggle, onDelete }) {
+function ProjectRow({ project, isToggling, onToggle, onDelete }) {
   return (
     <li className="card-interactive flex items-center justify-between gap-3">
       {/* Status dot + name */}
@@ -126,9 +140,12 @@ function ProjectRow({ project, onToggle, onDelete }) {
 
       {/* Actions */}
       <div className="flex flex-shrink-0 items-center gap-1.5">
-        <button onClick={() => onToggle(project)} className="btn-ghost">
-          {project.active ? 'Pause' : 'Enable'}
-        </button>
+        <ToggleSwitch
+          checked={project.active}
+          disabled={isToggling}
+          ariaLabel={`Set project ${project.name} as ${project.active ? 'inactive' : 'active'}`}
+          onChange={() => onToggle(project)}
+        />
         <Link to={`/projects/${project.id}`} className="btn-violet">
           Manage
         </Link>
