@@ -3,14 +3,28 @@ import { API_BASE, api } from '../api';
 
 const PLAYLIST_REFRESH_MS = 30_000;
 const PLAYLIST_RETRY_MS = 10_000;
+const VIDEO_START_TIMEOUT_MS = 60_000;
+const VIDEO_MAX_RECOVERIES = 2;
+
+const toMediaUrl = (item) => {
+  if (!item?.file) return null;
+  if (/^https?:\/\//i.test(item.file)) return item.file;
+  if (item.file.startsWith('/')) return `${API_BASE}${item.file}`;
+  return `${API_BASE}/media/${item.file}`;
+};
 
 export function PlayerView() {
   const [playlist, setPlaylist] = useState([]);
   const [index, setIndex] = useState(0);
   const [status, setStatus] = useState('loading');
   const [failedMedia, setFailedMedia] = useState({});
+  const [isVideoLoading, setIsVideoLoading] = useState(false);
+  const [videoLoadMessage, setVideoLoadMessage] = useState('Chargement de la vidéo...');
+  const [videoReady, setVideoReady] = useState(false);
   const retryTimeoutRef = useRef(null);
   const videoRef = useRef(null);
+  const videoLoadTimeoutRef = useRef(null);
+  const videoRecoveryAttemptsRef = useRef(0);
 
   const clearRetry = useCallback(() => {
     if (retryTimeoutRef.current) {
@@ -18,6 +32,46 @@ export function PlayerView() {
       retryTimeoutRef.current = null;
     }
   }, []);
+
+  const clearVideoLoadTimeout = useCallback(() => {
+    if (videoLoadTimeoutRef.current) {
+      clearTimeout(videoLoadTimeoutRef.current);
+      videoLoadTimeoutRef.current = null;
+    }
+  }, []);
+
+  const startVideoLoadTimeout = useCallback(() => {
+    clearVideoLoadTimeout();
+    videoLoadTimeoutRef.current = setTimeout(() => {
+      const video = videoRef.current;
+      if (!video) return;
+
+      setIsVideoLoading(true);
+      setVideoLoadMessage('La vidéo met trop de temps à démarrer...');
+
+      if (videoRecoveryAttemptsRef.current < VIDEO_MAX_RECOVERIES) {
+        videoRecoveryAttemptsRef.current += 1;
+        console.warn('Video startup timeout, attempting recovery', {
+          src: video.currentSrc,
+          attempt: videoRecoveryAttemptsRef.current,
+        });
+        video.load();
+        const playPromise = video.play();
+        if (playPromise?.catch) {
+          playPromise.catch((error) => {
+            console.warn('Video replay attempt failed:', error);
+          });
+        }
+        startVideoLoadTimeout();
+      } else {
+        console.error('Video startup timeout after maximum recovery attempts; skipping media', {
+          src: video.currentSrc,
+          attempts: videoRecoveryAttemptsRef.current,
+        });
+        clearVideoLoadTimeout();
+      }
+    }, VIDEO_START_TIMEOUT_MS);
+  }, [clearVideoLoadTimeout]);
 
   const loadPlaylist = useCallback(async () => {
     try {
@@ -57,8 +111,9 @@ export function PlayerView() {
     return () => {
       clearInterval(id);
       clearRetry();
+      clearVideoLoadTimeout();
     };
-  }, [clearRetry, loadPlaylist]);
+  }, [clearRetry, clearVideoLoadTimeout, loadPlaylist]);
 
   useEffect(() => {
     if (playlist.length === 0) {
@@ -89,12 +144,25 @@ export function PlayerView() {
     return () => clearTimeout(id);
   }, [currentItem, next]);
 
-  const currentUrl = useMemo(() => {
-    if (!currentItem?.file) return null;
-    if (/^https?:\/\//i.test(currentItem.file)) return currentItem.file;
-    if (currentItem.file.startsWith('/')) return `${API_BASE}${currentItem.file}`;
-    return `${API_BASE}/media/${currentItem.file}`;
-  }, [currentItem]);
+  const currentUrl = useMemo(() => toMediaUrl(currentItem), [currentItem]);
+
+  useEffect(() => {
+    const isVideo = currentItem?.type === 'video';
+    if (!isVideo) {
+      setIsVideoLoading(false);
+      setVideoReady(false);
+      setVideoLoadMessage('Chargement de la vidéo...');
+      videoRecoveryAttemptsRef.current = 0;
+      clearVideoLoadTimeout();
+      return;
+    }
+
+    setIsVideoLoading(true);
+    setVideoReady(false);
+    setVideoLoadMessage('Chargement de la vidéo...');
+    videoRecoveryAttemptsRef.current = 0;
+    startVideoLoadTimeout();
+  }, [clearVideoLoadTimeout, currentItem, startVideoLoadTimeout]);
 
   useEffect(() => {
     if (currentItem?.type !== 'video') return;
@@ -102,8 +170,6 @@ export function PlayerView() {
     const video = videoRef.current;
     if (!video) return;
 
-    // Keep muted by default because Chromium autoplay can block unmuted videos.
-    // A future setting can enable sound after kiosk policy/audio configuration is confirmed.
     video.muted = true;
     video.playsInline = true;
 
@@ -115,27 +181,46 @@ export function PlayerView() {
     }
   }, [currentItem, currentUrl]);
 
-  const nextUrl = useMemo(() => {
+  const nextItem = useMemo(() => {
     if (activePlaylist.length < 2) return null;
-    const nextItem = activePlaylist[(index + 1) % activePlaylist.length];
-    if (!nextItem?.file || nextItem.type !== 'image') return null;
-    if (/^https?:\/\//i.test(nextItem.file)) return nextItem.file;
-    if (nextItem.file.startsWith('/')) return `${API_BASE}${nextItem.file}`;
-    return `${API_BASE}/media/${nextItem.file}`;
+    return activePlaylist[(index + 1) % activePlaylist.length] ?? null;
   }, [activePlaylist, index]);
 
+  const nextUrl = useMemo(() => toMediaUrl(nextItem), [nextItem]);
+
   useEffect(() => {
-    if (!nextUrl) return;
-    const img = new Image();
-    img.src = nextUrl;
-  }, [nextUrl]);
+    if (!nextItem || !nextUrl) return undefined;
+
+    if (nextItem.type === 'image') {
+      const img = new Image();
+      img.src = nextUrl;
+      return undefined;
+    }
+
+    if (nextItem.type === 'video') {
+      const preloadVideo = document.createElement('video');
+      preloadVideo.preload = 'auto';
+      preloadVideo.muted = true;
+      preloadVideo.playsInline = true;
+      preloadVideo.src = nextUrl;
+      preloadVideo.load();
+
+      return () => {
+        preloadVideo.removeAttribute('src');
+        preloadVideo.load();
+      };
+    }
+
+    return undefined;
+  }, [nextItem, nextUrl]);
 
   const markCurrentFailed = useCallback(() => {
     if (!currentItem) return;
+    clearVideoLoadTimeout();
     const key = `${currentItem.file}-${index}`;
     setFailedMedia((current) => ({ ...current, [key]: true }));
     next();
-  }, [currentItem, index, next]);
+  }, [clearVideoLoadTimeout, currentItem, index, next]);
 
   if (!currentItem || !currentUrl) {
     return (
@@ -152,7 +237,7 @@ export function PlayerView() {
   }
 
   return (
-    <div className="flex h-screen w-screen items-center justify-center overflow-hidden bg-black">
+    <div className="relative flex h-screen w-screen items-center justify-center overflow-hidden bg-black">
       {currentItem.type === 'video' ? (
         <video
           ref={videoRef}
@@ -164,9 +249,15 @@ export function PlayerView() {
           playsInline
           preload="auto"
           controls={false}
-          onLoadedData={() => console.log('Video loaded data:', currentUrl)}
+          onLoadStart={() => {
+            console.log('Video loadstart:', currentUrl);
+            setIsVideoLoading(true);
+            setVideoReady(false);
+            setVideoLoadMessage('Chargement de la vidéo...');
+            startVideoLoadTimeout();
+          }}
           onCanPlay={() => {
-            console.log('Video can play:', currentUrl);
+            console.log('Video canplay:', currentUrl);
             const playPromise = videoRef.current?.play();
             if (playPromise?.catch) {
               playPromise.catch((error) => {
@@ -174,9 +265,29 @@ export function PlayerView() {
               });
             }
           }}
-          onPlaying={() => console.log('Video playing:', currentUrl)}
-          onWaiting={() => console.warn('Video waiting/buffering:', currentUrl)}
-          onStalled={() => console.warn('Video stalled:', currentUrl)}
+          onCanPlayThrough={() => {
+            console.log('Video canplaythrough:', currentUrl);
+          }}
+          onPlaying={() => {
+            console.log('Video playing:', currentUrl);
+            setVideoReady(true);
+            setIsVideoLoading(false);
+            setVideoLoadMessage('');
+            videoRecoveryAttemptsRef.current = 0;
+            clearVideoLoadTimeout();
+          }}
+          onWaiting={() => {
+            console.warn('Video waiting/buffering:', currentUrl);
+            setIsVideoLoading(true);
+            setVideoLoadMessage('Mise en mémoire tampon de la vidéo...');
+            startVideoLoadTimeout();
+          }}
+          onStalled={() => {
+            console.warn('Video stalled:', currentUrl);
+            setIsVideoLoading(true);
+            setVideoLoadMessage('Le chargement vidéo est ralenti...');
+            startVideoLoadTimeout();
+          }}
           onEnded={next}
           onError={(event) => {
             const video = event.currentTarget;
@@ -186,6 +297,8 @@ export function PlayerView() {
               networkState: video.networkState,
               readyState: video.readyState,
             });
+            setIsVideoLoading(true);
+            setVideoLoadMessage('Erreur vidéo, passage au média suivant...');
             markCurrentFailed();
           }}
         />
@@ -198,6 +311,18 @@ export function PlayerView() {
           draggable={false}
           onError={markCurrentFailed}
         />
+      )}
+
+      {currentItem.type === 'video' && (isVideoLoading || !videoReady) && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/85 px-8 text-center text-slate-100">
+          <div>
+            <p className="text-2xl font-semibold tracking-wide md:text-3xl">PixFlow</p>
+            <p className="mt-3 text-base text-slate-200 md:text-lg">{videoLoadMessage || 'Chargement de la vidéo...'}</p>
+            {currentItem.file && (
+              <p className="mt-2 text-xs text-slate-400 md:text-sm break-all">{currentItem.file}</p>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

@@ -43,7 +43,19 @@ const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', ...VIDEO_E
 
 app.use(cors());
 app.use(express.json());
-app.use('/media', express.static(mediaDir));
+app.use('/media', express.static(mediaDir, {
+  maxAge: '7d',
+  immutable: true,
+  setHeaders: (res, filePath) => {
+    res.setHeader('Accept-Ranges', 'bytes');
+
+    if (VIDEO_EXTENSIONS.has(path.extname(filePath).toLowerCase())) {
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+    } else {
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+    }
+  },
+}));
 
 const storage = multer.diskStorage({
   destination: async (_req, _file, cb) => {
