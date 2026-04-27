@@ -8,6 +8,8 @@ services:
     environment:
       - DATA_ROOT=/data
       - MAX_UPLOAD_SIZE_BYTES=524288000
+      - VIDEO_MAX_WIDTH=1920
+      - VIDEO_MAX_FPS=30
     volumes:
       - pixflow_data:/data
     networks: [pixflow]
