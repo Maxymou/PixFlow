@@ -8,6 +8,7 @@ export function ProjectDetail({ projects, onRefresh }) {
   const [duration, setDuration] = useState(5);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadComplete, setUploadComplete] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadFileName, setUploadFileName] = useState('');
   const [uploadError, setUploadError] = useState('');
@@ -40,8 +41,9 @@ export function ProjectDetail({ projects, onRefresh }) {
       const file = files?.[0];
       if (!file || uploading) return;
       setUploading(true);
+      setUploadComplete(false);
       setUploadFileName(file.name || '');
-      setUploadProgress(0);
+      setUploadProgress(1);
       setUploadError('');
       try {
         const form = new FormData();
@@ -55,7 +57,7 @@ export function ProjectDetail({ projects, onRefresh }) {
 
           xhr.upload.onprogress = (event) => {
             if (!event.lengthComputable) return;
-            const percent = Math.round((event.loaded / event.total) * 100);
+            const percent = Math.max(1, Math.round((event.loaded / event.total) * 100));
             setUploadProgress(percent);
           };
 
@@ -63,6 +65,7 @@ export function ProjectDetail({ projects, onRefresh }) {
             const payload = xhr.response || {};
             if (xhr.status >= 200 && xhr.status < 300) {
               setUploadProgress(100);
+              setUploadComplete(true);
               resolve(payload);
               return;
             }
@@ -80,9 +83,12 @@ export function ProjectDetail({ projects, onRefresh }) {
       } catch (error) {
         setUploadError(error.message || 'Upload failed');
       } finally {
-        setUploadProgress(0);
-        setUploadFileName('');
-        setUploading(false);
+        setTimeout(() => {
+          setUploading(false);
+          setUploadComplete(false);
+          setUploadProgress(0);
+          setUploadFileName('');
+        }, 1500);
       }
     },
     [id, duration, uploading, loadMedia],
@@ -172,10 +178,10 @@ export function ProjectDetail({ projects, onRefresh }) {
           <p className="mt-2 text-sm text-rose-400">{uploadError}</p>
         )}
 
-        {uploading && (
+        {(uploading || uploadComplete) && (
           <div className="mt-4">
             <div className="mb-1 flex justify-between text-xs text-slate-400">
-              <span>Upload en cours…</span>
+              <span>{uploadComplete ? 'Upload terminé' : 'Upload en cours…'}</span>
               <span>{uploadProgress}%</span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-slate-800">
