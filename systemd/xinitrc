@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ -z "${DISPLAY:-}" ]; then
-  echo "DISPLAY is not set. Use systemd/pixflow-kiosk.service with startx, or run this script inside an existing graphical session."
-  exit 1
-fi
-
 export DISPLAY="${DISPLAY:-:0}"
-# Disable screensaver / DPMS / blanking
+
+# Disable screensaver / DPMS / screen blanking
 xset s off || true
 xset -dpms || true
 xset s noblank || true
 
+# Start a minimal window manager if available
+if command -v openbox-session >/dev/null 2>&1; then
+  openbox-session &
+fi
+
 # Hide mouse cursor if unclutter exists
-command -v unclutter >/dev/null 2>&1 && unclutter -idle 0.5 -root &
+if command -v unclutter >/dev/null 2>&1; then
+  unclutter -idle 0.5 -root &
+fi
 
 CHROMIUM_BIN="$(command -v chromium || command -v chromium-browser || true)"
 if [ -z "${CHROMIUM_BIN}" ]; then
