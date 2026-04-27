@@ -20,6 +20,12 @@ const settingsFile = path.join(dataRoot, 'settings.json');
 const DEFAULT_MAX_UPLOAD_SIZE_BYTES = 500 * 1024 * 1024;
 const MAX_UPLOAD_SIZE_BYTES = Number(process.env.MAX_UPLOAD_SIZE_BYTES || DEFAULT_MAX_UPLOAD_SIZE_BYTES);
 const MAX_MEDIA_FILES = Number(process.env.MAX_MEDIA_FILES || 2000);
+const DEFAULT_VIDEO_MAX_WIDTH = 1920;
+const DEFAULT_VIDEO_MAX_FPS = 30;
+const VIDEO_MAX_WIDTH = Number(process.env.VIDEO_MAX_WIDTH || DEFAULT_VIDEO_MAX_WIDTH);
+const VIDEO_MAX_FPS = Number(process.env.VIDEO_MAX_FPS || DEFAULT_VIDEO_MAX_FPS);
+const safeVideoMaxWidth = Number.isFinite(VIDEO_MAX_WIDTH) && VIDEO_MAX_WIDTH > 0 ? Math.round(VIDEO_MAX_WIDTH) : DEFAULT_VIDEO_MAX_WIDTH;
+const safeVideoMaxFps = Number.isFinite(VIDEO_MAX_FPS) && VIDEO_MAX_FPS > 0 ? VIDEO_MAX_FPS : DEFAULT_VIDEO_MAX_FPS;
 const ALLOWED_UPLOAD_TYPES = new Set([
   'image/jpeg',
   'image/png',
@@ -134,6 +140,7 @@ const ffprobeDuration = (inputPath) => new Promise((resolve, reject) => {
 
 const runFfmpeg = (inputPath, outputPath, { onProgress } = {}) => new Promise((resolve, reject) => {
   let stderr = '';
+  const videoFilter = `fps=${safeVideoMaxFps},scale='min(${safeVideoMaxWidth},iw)':-2`;
   const ffmpeg = spawn('ffmpeg', [
     '-y',
     '-i', inputPath,
@@ -143,7 +150,7 @@ const runFfmpeg = (inputPath, outputPath, { onProgress } = {}) => new Promise((r
     '-pix_fmt', 'yuv420p',
     '-profile:v', 'main',
     '-level', '4.0',
-    '-vf', "scale='min(1920,iw)':-2",
+    '-vf', videoFilter,
     '-c:a', 'aac',
     '-b:a', '128k',
     '-ac', '2',

@@ -105,6 +105,26 @@ docker compose --profile docker-player up -d --build
   playlist.json
 ```
 
+## Video conversion settings (Raspberry Pi friendly)
+Backend conversion keeps uploaded videos in MP4 (H.264 Main/Level 4.0 + AAC) with `yuv420p` and `+faststart`.
+
+You can tune conversion limits with environment variables:
+
+```env
+VIDEO_MAX_WIDTH=1920
+VIDEO_MAX_FPS=30
+```
+
+Lower-power mode example:
+
+```env
+VIDEO_MAX_WIDTH=1280
+VIDEO_MAX_FPS=30
+```
+
+After changing these values, remove and re-upload videos you want to reconvert (already converted files are not retroactively re-encoded).
+
+
 ## Troubleshooting
 
 ### Check containers
