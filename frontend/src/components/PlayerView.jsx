@@ -100,6 +100,8 @@ export function PlayerView() {
     const video = videoRef.current;
     if (!video) return;
 
+    // Keep muted by default because Chromium autoplay can block unmuted videos.
+    // A future setting can enable sound after kiosk policy/audio configuration is confirmed.
     video.muted = true;
     video.playsInline = true;
 
@@ -160,7 +162,9 @@ export function PlayerView() {
           playsInline
           preload="auto"
           controls={false}
+          onLoadedData={() => console.log('Video loaded data:', currentUrl)}
           onCanPlay={() => {
+            console.log('Video can play:', currentUrl);
             const playPromise = videoRef.current?.play();
             if (playPromise?.catch) {
               playPromise.catch((error) => {
@@ -168,8 +172,20 @@ export function PlayerView() {
               });
             }
           }}
+          onPlaying={() => console.log('Video playing:', currentUrl)}
+          onWaiting={() => console.warn('Video waiting/buffering:', currentUrl)}
+          onStalled={() => console.warn('Video stalled:', currentUrl)}
           onEnded={next}
-          onError={markCurrentFailed}
+          onError={(event) => {
+            const video = event.currentTarget;
+            console.error('Video error:', {
+              url: currentUrl,
+              error: video.error,
+              networkState: video.networkState,
+              readyState: video.readyState,
+            });
+            markCurrentFailed();
+          }}
         />
       ) : (
         <img
