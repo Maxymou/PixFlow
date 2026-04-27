@@ -22,7 +22,9 @@ export function PlayerView() {
   const loadPlaylist = useCallback(async () => {
     try {
       const items = await api('/api/playlist');
-      const nextPlaylist = Array.isArray(items) ? items : [];
+      const nextPlaylist = Array.isArray(items)
+        ? items.filter((item) => (item.status || 'ready') === 'ready')
+        : [];
       setPlaylist(nextPlaylist);
       localStorage.setItem('playlist', JSON.stringify(nextPlaylist));
       setStatus('online');
