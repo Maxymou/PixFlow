@@ -25,11 +25,15 @@ const ALLOWED_UPLOAD_TYPES = new Set([
   'image/png',
   'image/webp',
   'video/mp4',
+  'video/quicktime',
   'video/x-msvideo',
   'video/avi',
+  'video/x-matroska',
+  'video/webm',
   'application/octet-stream',
 ]);
-const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.mp4', '.avi']);
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.avi', '.mov', '.mkv', '.webm']);
+const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', ...VIDEO_EXTENSIONS]);
 
 app.use(cors());
 app.use(express.json());
@@ -50,10 +54,10 @@ const isAllowedUpload = (file) => {
   if (!ALLOWED_EXTENSIONS.has(ext)) return false;
 
   if (file.mimetype.startsWith('image/')) return true;
-  if (file.mimetype.startsWith('video/')) return true;
-  if (ext === '.avi' && file.mimetype === 'application/octet-stream') return true;
+  if (file.mimetype.startsWith('video/')) return ALLOWED_UPLOAD_TYPES.has(file.mimetype);
+  if (file.mimetype === 'application/octet-stream') return VIDEO_EXTENSIONS.has(ext);
 
-  return ALLOWED_UPLOAD_TYPES.has(file.mimetype) && ext === '.avi';
+  return false;
 };
 
 const upload = multer({
@@ -88,30 +92,39 @@ const mediaTypeFromName = (filename, mimetype = '') => {
   if (mimetype.startsWith('video/')) return 'video';
   if (mimetype.startsWith('image/')) return 'image';
   const ext = path.extname(filename).toLowerCase();
-  return ['.avi', '.mp4', '.mov', '.mkv', '.webm'].includes(ext) ? 'video' : 'image';
+  return VIDEO_EXTENSIONS.has(ext) ? 'video' : 'image';
 };
 
 const runFfmpeg = (inputPath, outputPath) => new Promise((resolve, reject) => {
+  let stderr = '';
   const ffmpeg = spawn('ffmpeg', [
     '-y',
     '-i', inputPath,
     '-c:v', 'libx264',
     '-preset', 'veryfast',
     '-crf', '23',
+    '-pix_fmt', 'yuv420p',
+    '-profile:v', 'main',
+    '-level', '4.0',
+    '-vf', "scale='min(1920,iw)':-2",
     '-c:a', 'aac',
+    '-b:a', '128k',
+    '-ac', '2',
     '-movflags', '+faststart',
     outputPath,
   ]);
 
   ffmpeg.stderr.on('data', (data) => {
-    console.log(`[ffmpeg] ${data}`);
+    const text = data.toString();
+    stderr += text;
+    console.log(`[ffmpeg] ${text}`);
   });
 
   ffmpeg.on('error', reject);
 
   ffmpeg.on('close', (code) => {
     if (code === 0) resolve();
-    else reject(new Error(`ffmpeg exited with code ${code}`));
+    else reject(new Error(`ffmpeg exited with code ${code}: ${stderr}`));
   });
 });
 
@@ -210,33 +223,34 @@ app.post('/media/upload', upload.single('file'), async (req, res, next) => {
     await ensureMediaCapacity();
 
     const media = await readJson(mediaFile);
-    const originalExt = path.extname(req.file.originalname).toLowerCase();
-    const isAvi = originalExt === '.avi';
     const inputPath = path.join(incomingDir, req.file.filename);
+    const isVideo = mediaTypeFromName(req.file.originalname, req.file.mimetype) === 'video';
 
-    let finalName = `${nanoid()}-${req.file.filename}`;
+    let finalName;
 
     try {
-      if (isAvi) {
+      if (isVideo) {
         finalName = `${nanoid()}-${path.basename(req.file.filename, path.extname(req.file.filename))}.mp4`;
         const outputPath = path.join(mediaDir, finalName);
         await runFfmpeg(inputPath, outputPath);
         await fs.rm(inputPath, { force: true });
       } else {
+        finalName = `${nanoid()}-${req.file.filename}`;
         await fs.rename(inputPath, path.join(mediaDir, finalName));
       }
     } catch (error) {
       await fs.rm(inputPath, { force: true });
-      if (isAvi) {
-        return res.status(500).json({ error: 'video conversion failed' });
-      }
-      throw error;
+      console.error('media processing failed:', error);
+      return res.status(500).json({
+        error: isVideo ? 'video conversion failed' : 'media processing failed',
+        details: error.message,
+      });
     }
 
     const item = {
       id: nanoid(),
       projectId,
-      type: mediaTypeFromName(finalName, req.file.mimetype),
+      type: isVideo ? 'video' : 'image',
       file: finalName,
       active: true,
       duration: Number(duration || 5),
