@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { API_BASE, api } from '../api';
+import { ToggleSwitch } from './ToggleSwitch';
 
 export function ProjectDetail({ projects, onRefresh }) {
   const { id } = useParams();
@@ -12,6 +13,7 @@ export function ProjectDetail({ projects, onRefresh }) {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadFileName, setUploadFileName] = useState('');
   const [uploadError, setUploadError] = useState('');
+  const [togglingMediaIds, setTogglingMediaIds] = useState(new Set());
   const fileRef = useRef(null);
 
   const project = useMemo(() => projects.find((p) => p.id === id), [projects, id]);
@@ -95,11 +97,22 @@ export function ProjectDetail({ projects, onRefresh }) {
   );
 
   const toggle = async (item) => {
-    await api(`/api/media/${item.id}/active`, {
-      method: 'PATCH',
-      body: JSON.stringify({ active: !item.active }),
-    });
-    loadMedia();
+    if (togglingMediaIds.has(item.id)) return;
+
+    setTogglingMediaIds((prev) => new Set(prev).add(item.id));
+    try {
+      await api(`/api/media/${item.id}/active`, {
+        method: 'PATCH',
+        body: JSON.stringify({ active: !item.active }),
+      });
+      await loadMedia();
+    } finally {
+      setTogglingMediaIds((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
+    }
   };
 
   const remove = async (item) => {
@@ -227,6 +240,7 @@ export function ProjectDetail({ projects, onRefresh }) {
                 key={item.id}
                 item={item}
                 onToggle={toggle}
+                isToggling={togglingMediaIds.has(item.id)}
                 onRemove={remove}
                 onDurationChange={updateDuration}
               />
@@ -238,26 +252,13 @@ export function ProjectDetail({ projects, onRefresh }) {
   );
 }
 
-function MediaRow({ item, onToggle, onRemove, onDurationChange }) {
+function MediaRow({ item, isToggling, onToggle, onRemove, onDurationChange }) {
   const [editingDur, setEditingDur] = useState(false);
   const [dur, setDur] = useState(item.duration ?? 5);
   const status = item.status || 'ready';
   const isReady = status === 'ready';
   const previewUrl = item.file ? `${API_BASE}/media/${item.file}` : '';
   const fileLabel = item.file || item.sourceFile || 'pending';
-  const getActionLabel = () => {
-    if (status === 'processing') return 'Processing';
-    if (status === 'failed') return 'Failed';
-    if (!isReady) return 'Unavailable';
-    return item.active ? 'Pause' : 'Enable';
-  };
-  const actionTitle = status === 'processing'
-    ? 'Video is still converting'
-    : status === 'failed'
-    ? 'Video conversion failed'
-    : item.active
-    ? 'Pause this media'
-    : 'Enable this media';
 
   const saveDuration = () => {
     onDurationChange(item, dur);
@@ -356,14 +357,18 @@ function MediaRow({ item, onToggle, onRemove, onDurationChange }) {
       </div>
 
       <div className="flex flex-shrink-0 items-center gap-1.5">
-        <button
-          disabled={!isReady}
-          onClick={() => isReady && onToggle(item)}
-          title={actionTitle}
-          className="btn-ghost disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {getActionLabel()}
-        </button>
+        <ToggleSwitch
+          checked={item.active}
+          disabled={!isReady || isToggling}
+          ariaLabel={
+            status === 'processing'
+              ? 'Media processing in progress'
+              : status === 'failed'
+              ? 'Media conversion failed'
+              : `Set media ${fileLabel} as ${item.active ? 'inactive' : 'active'}`
+          }
+          onChange={() => isReady && onToggle(item)}
+        />
         <button onClick={() => onRemove(item)} className="btn-danger" title="Delete">
           ✕
         </button>
