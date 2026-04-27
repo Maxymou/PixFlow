@@ -40,7 +40,21 @@ export function PlayerView() {
     }
   }, []);
 
-  const startVideoLoadTimeout = useCallback(() => {
+  const markMediaFailed = useCallback((item, itemSourceIndex) => {
+    if (!item || itemSourceIndex < 0) return;
+    clearVideoLoadTimeout();
+    const key = `${item.file}-${itemSourceIndex}`;
+    setFailedMedia((current) => ({ ...current, [key]: true }));
+  }, [clearVideoLoadTimeout]);
+
+  const next = useCallback((activePlaylistLength) => {
+    setIndex((prev) => {
+      if (activePlaylistLength === 0) return 0;
+      return (prev + 1) % activePlaylistLength;
+    });
+  }, []);
+
+  const startVideoLoadTimeout = useCallback((item, itemSourceIndex, activePlaylistLength) => {
     clearVideoLoadTimeout();
     videoLoadTimeoutRef.current = setTimeout(() => {
       const video = videoRef.current;
@@ -62,16 +76,20 @@ export function PlayerView() {
             console.warn('Video replay attempt failed:', error);
           });
         }
-        startVideoLoadTimeout();
+        startVideoLoadTimeout(item, itemSourceIndex, activePlaylistLength);
       } else {
-        console.error('Video startup timeout after maximum recovery attempts; skipping media', {
+        console.error('Video failed after recovery attempts, marking media as failed', {
+          file: item?.file,
+          index: itemSourceIndex,
           src: video.currentSrc,
-          attempts: videoRecoveryAttemptsRef.current,
+          attempts: VIDEO_MAX_RECOVERIES,
         });
         clearVideoLoadTimeout();
+        markMediaFailed(item, itemSourceIndex);
+        next(activePlaylistLength);
       }
     }, VIDEO_START_TIMEOUT_MS);
-  }, [clearVideoLoadTimeout]);
+  }, [clearVideoLoadTimeout, markMediaFailed, next]);
 
   const loadPlaylist = useCallback(async () => {
     try {
@@ -116,33 +134,46 @@ export function PlayerView() {
   }, [clearRetry, clearVideoLoadTimeout, loadPlaylist]);
 
   useEffect(() => {
-    if (playlist.length === 0) {
-      setIndex(0);
-      return;
-    }
-    setIndex((prev) => prev % playlist.length);
+    setFailedMedia((current) => {
+      const validKeys = new Set(playlist.map((item, itemIndex) => `${item.file}-${itemIndex}`));
+      const filteredEntries = Object.entries(current).filter(([key]) => validKeys.has(key));
+      if (filteredEntries.length === Object.keys(current).length) return current;
+      return Object.fromEntries(filteredEntries);
+    });
   }, [playlist]);
 
-  const next = useCallback(() => {
-    setIndex((prev) => {
-      if (playlist.length === 0) return 0;
-      return (prev + 1) % playlist.length;
-    });
-  }, [playlist.length]);
-
   const activePlaylist = useMemo(() => (
-    playlist.filter((item, itemIndex) => !failedMedia[`${item.file}-${itemIndex}`])
+    playlist
+      .map((item, sourceIndex) => ({ item, sourceIndex }))
+      .filter(({ item, sourceIndex }) => !failedMedia[`${item.file}-${sourceIndex}`])
   ), [failedMedia, playlist]);
 
-  const currentItem = activePlaylist[index] ?? null;
+  useEffect(() => {
+    if (activePlaylist.length === 0) {
+      if (index !== 0) setIndex(0);
+      return;
+    }
+    if (index >= activePlaylist.length) {
+      console.warn('Player index out of range, resetting', {
+        index,
+        playlistLength: playlist.length,
+        activePlaylistLength: activePlaylist.length,
+      });
+      setIndex(0);
+    }
+  }, [activePlaylist.length, index, playlist.length]);
+
+  const currentEntry = activePlaylist[index] ?? null;
+  const currentItem = currentEntry?.item ?? null;
+  const currentSourceIndex = currentEntry?.sourceIndex ?? -1;
 
   useEffect(() => {
     if (!currentItem || currentItem.type !== 'image') return undefined;
 
     const durationSeconds = Number(currentItem.duration) > 0 ? Number(currentItem.duration) : 5;
-    const id = setTimeout(next, durationSeconds * 1_000);
+    const id = setTimeout(() => next(activePlaylist.length), durationSeconds * 1_000);
     return () => clearTimeout(id);
-  }, [currentItem, next]);
+  }, [activePlaylist.length, currentItem, next]);
 
   const currentUrl = useMemo(() => toMediaUrl(currentItem), [currentItem]);
 
@@ -161,8 +192,8 @@ export function PlayerView() {
     setVideoReady(false);
     setVideoLoadMessage('Chargement de la vidéo...');
     videoRecoveryAttemptsRef.current = 0;
-    startVideoLoadTimeout();
-  }, [clearVideoLoadTimeout, currentItem, startVideoLoadTimeout]);
+    startVideoLoadTimeout(currentItem, currentSourceIndex, activePlaylist.length);
+  }, [activePlaylist.length, clearVideoLoadTimeout, currentItem, currentSourceIndex, startVideoLoadTimeout]);
 
   useEffect(() => {
     if (currentItem?.type !== 'video') return;
@@ -181,11 +212,12 @@ export function PlayerView() {
     }
   }, [currentItem, currentUrl]);
 
-  const nextItem = useMemo(() => {
+  const nextEntry = useMemo(() => {
     if (activePlaylist.length < 2) return null;
     return activePlaylist[(index + 1) % activePlaylist.length] ?? null;
   }, [activePlaylist, index]);
 
+  const nextItem = nextEntry?.item ?? null;
   const nextUrl = useMemo(() => toMediaUrl(nextItem), [nextItem]);
 
   useEffect(() => {
@@ -215,14 +247,23 @@ export function PlayerView() {
   }, [nextItem, nextUrl]);
 
   const markCurrentFailed = useCallback(() => {
-    if (!currentItem) return;
-    clearVideoLoadTimeout();
-    const key = `${currentItem.file}-${index}`;
-    setFailedMedia((current) => ({ ...current, [key]: true }));
-    next();
-  }, [clearVideoLoadTimeout, currentItem, index, next]);
+    if (!currentItem || currentSourceIndex < 0) return;
+    markMediaFailed(currentItem, currentSourceIndex);
+    next(activePlaylist.length);
+  }, [activePlaylist.length, currentItem, currentSourceIndex, markMediaFailed, next]);
 
   if (!currentItem || !currentUrl) {
+    if (playlist.length > 0 && activePlaylist.length > 0) {
+      return (
+        <div className="flex h-screen w-screen items-center justify-center overflow-hidden bg-black px-8 text-center text-slate-200">
+          <div>
+            <h1 className="text-4xl font-semibold tracking-tight text-slate-100 md:text-6xl">PixFlow Player</h1>
+            <p className="mt-5 text-lg text-slate-400 md:text-2xl">Loading media...</p>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="flex h-screen w-screen items-center justify-center overflow-hidden bg-black px-8 text-center text-slate-200">
         <div>
@@ -254,7 +295,7 @@ export function PlayerView() {
             setIsVideoLoading(true);
             setVideoReady(false);
             setVideoLoadMessage('Chargement de la vidéo...');
-            startVideoLoadTimeout();
+            startVideoLoadTimeout(currentItem, currentSourceIndex, activePlaylist.length);
           }}
           onCanPlay={() => {
             console.log('Video canplay:', currentUrl);
@@ -280,15 +321,15 @@ export function PlayerView() {
             console.warn('Video waiting/buffering:', currentUrl);
             setIsVideoLoading(true);
             setVideoLoadMessage('Mise en mémoire tampon de la vidéo...');
-            startVideoLoadTimeout();
+            startVideoLoadTimeout(currentItem, currentSourceIndex, activePlaylist.length);
           }}
           onStalled={() => {
             console.warn('Video stalled:', currentUrl);
             setIsVideoLoading(true);
             setVideoLoadMessage('Le chargement vidéo est ralenti...');
-            startVideoLoadTimeout();
+            startVideoLoadTimeout(currentItem, currentSourceIndex, activePlaylist.length);
           }}
-          onEnded={next}
+          onEnded={() => next(activePlaylist.length)}
           onError={(event) => {
             const video = event.currentTarget;
             console.error('Video error:', {
