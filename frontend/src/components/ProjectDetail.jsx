@@ -245,6 +245,19 @@ function MediaRow({ item, onToggle, onRemove, onDurationChange }) {
   const isReady = status === 'ready';
   const previewUrl = item.file ? `${API_BASE}/media/${item.file}` : '';
   const fileLabel = item.file || item.sourceFile || 'pending';
+  const getActionLabel = () => {
+    if (status === 'processing') return 'Processing';
+    if (status === 'failed') return 'Failed';
+    if (!isReady) return 'Unavailable';
+    return item.active ? 'Pause' : 'Enable';
+  };
+  const actionTitle = status === 'processing'
+    ? 'Video is still converting'
+    : status === 'failed'
+    ? 'Video conversion failed'
+    : item.active
+    ? 'Pause this media'
+    : 'Enable this media';
 
   const saveDuration = () => {
     onDurationChange(item, dur);
@@ -346,9 +359,10 @@ function MediaRow({ item, onToggle, onRemove, onDurationChange }) {
         <button
           disabled={!isReady}
           onClick={() => isReady && onToggle(item)}
+          title={actionTitle}
           className="btn-ghost disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {!isReady ? 'Processing' : item.active ? 'Pause' : 'Enable'}
+          {getActionLabel()}
         </button>
         <button onClick={() => onRemove(item)} className="btn-danger" title="Delete">
           ✕
