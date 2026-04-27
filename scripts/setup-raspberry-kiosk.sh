@@ -5,6 +5,8 @@ SERVICE_NAME="pixflow-kiosk.service"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
 TARGET_USER=${SUDO_USER:-${USER:-$(id -un)}}
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SERVICE_TEMPLATE="${REPO_DIR}/systemd/pixflow-kiosk.service"
+XINITRC_TEMPLATE="${REPO_DIR}/systemd/xinitrc"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Please run as root (for example: sudo bash scripts/setup-raspberry-kiosk.sh)."
@@ -22,35 +24,37 @@ if [ -z "${TARGET_HOME}" ]; then
   exit 1
 fi
 
+if [ ! -f "${SERVICE_TEMPLATE}" ]; then
+  echo "Missing service template: ${SERVICE_TEMPLATE}"
+  exit 1
+fi
+
+if [ ! -f "${XINITRC_TEMPLATE}" ]; then
+  echo "Missing xinitrc template: ${XINITRC_TEMPLATE}"
+  exit 1
+fi
+
 echo "Installing Raspberry kiosk dependencies..."
 apt-get update
 apt-get install -y x11-xserver-utils unclutter chromium-browser || apt-get install -y x11-xserver-utils unclutter chromium
 
-chmod +x "${REPO_DIR}/scripts/start-kiosk.sh"
+echo "Installing kiosk xinitrc from template..."
+install -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${XINITRC_TEMPLATE}" "${TARGET_HOME}/.xinitrc"
 
-cat >"${SERVICE_PATH}" <<SERVICE
-[Unit]
-Description=PixFlow Chromium Kiosk
-After=graphical.target docker.service
-Wants=graphical.target
-
-[Service]
-Type=simple
-User=${TARGET_USER}
-Environment=DISPLAY=:0
-Environment=XAUTHORITY=${TARGET_HOME}/.Xauthority
-Environment=PIXFLOW_KIOSK_URL=http://127.0.0.1:3000/player
-ExecStart=${REPO_DIR}/scripts/start-kiosk.sh
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=graphical.target
-SERVICE
+echo "Installing kiosk systemd service from template..."
+sed \
+  -e "s|^User=.*|User=${TARGET_USER}|" \
+  -e "s|^WorkingDirectory=.*|WorkingDirectory=${REPO_DIR}|" \
+  -e "s|/home/maxymou/.xinitrc|${TARGET_HOME}/.xinitrc|" \
+  "${SERVICE_TEMPLATE}" > "${SERVICE_PATH}"
+chmod 0644 "${SERVICE_PATH}"
 
 echo "Reloading systemd and enabling ${SERVICE_NAME}..."
 systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}"
 systemctl restart "${SERVICE_NAME}"
+
+echo "Installed ExecStart:"
+systemctl cat "${SERVICE_NAME}" | grep ExecStart || true
 
 echo "Kiosk service installed and started: ${SERVICE_NAME}"
