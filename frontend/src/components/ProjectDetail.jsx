@@ -14,6 +14,7 @@ export function ProjectDetail({ projects, onRefresh }) {
   const [uploadFileName, setUploadFileName] = useState('');
   const [uploadError, setUploadError] = useState('');
   const [togglingMediaIds, setTogglingMediaIds] = useState(new Set());
+  const [togglingProject, setTogglingProject] = useState(false);
   const fileRef = useRef(null);
 
   const project = useMemo(() => projects.find((p) => p.id === id), [projects, id]);
@@ -132,9 +133,24 @@ export function ProjectDetail({ projects, onRefresh }) {
 
   const activeCount = media.filter((m) => m.active && (m.status || 'ready') === 'ready').length;
 
+  const toggleProject = async () => {
+    if (!project || togglingProject) return;
+
+    setTogglingProject(true);
+    try {
+      await api(`/api/projects/${project.id}/active`, {
+        method: 'PATCH',
+        body: JSON.stringify({ active: !project.active }),
+      });
+      await onRefresh();
+    } finally {
+      setTogglingProject(false);
+    }
+  };
+
   return (
     <div className="animate-slide-up space-y-5">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Link to="/" className="btn-ghost flex-shrink-0">
           ← Back
         </Link>
@@ -146,9 +162,17 @@ export function ProjectDetail({ projects, onRefresh }) {
             {activeCount}/{media.length} media active
           </p>
         </div>
-        <span className={project?.active ? 'badge-active' : 'badge-inactive'}>
-          {project?.active ? 'Live' : 'Paused'}
-        </span>
+        <div className="ml-auto flex flex-shrink-0 items-center gap-2">
+          <ToggleSwitch
+            checked={Boolean(project?.active)}
+            disabled={!project || togglingProject}
+            ariaLabel={`Set project ${project?.name ?? 'project'} as ${project?.active ? 'inactive' : 'active'}`}
+            onChange={toggleProject}
+          />
+          <span className={project?.active ? 'badge-active' : 'badge-inactive'}>
+            {project?.active ? 'Live' : 'Inactive'}
+          </span>
+        </div>
       </div>
 
       <div
