@@ -54,6 +54,28 @@ export PIXFLOW_KIOSK_URL=http://localhost:3000/player
 sudo bash scripts/setup-raspberry-kiosk.sh
 ```
 
+
+## Updating PixFlow on Raspberry Pi
+
+To fully update PixFlow on Raspberry Pi (code + Docker + installed kiosk system files):
+
+```bash
+cd /home/maxymou/PixFlow
+./update.sh
+```
+
+`git pull` alone does **not** refresh already-installed host files such as:
+
+- `/etc/systemd/system/pixflow-kiosk.service`
+- `/home/maxymou/.xinitrc`
+
+Use kiosk-only mode when you only want to reinstall kiosk system files and restart the service:
+
+```bash
+cd /home/maxymou/PixFlow
+./update.sh --kiosk-only
+```
+
 ## DEV installation (Proxmox / server)
 ```bash
 chmod +x install.sh
