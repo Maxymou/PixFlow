@@ -648,6 +648,7 @@ app.post('/media/upload', upload.single('file'), async (req, res, next) => {
       id: nanoid(),
       projectId,
       type: isVideo ? 'video' : 'image',
+      originalName: req.file.originalname,
       file: null,
       active: true,
       duration: Number(duration || 5),

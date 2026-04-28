@@ -117,7 +117,7 @@ export function ProjectDetail({ projects, onRefresh }) {
   };
 
   const remove = async (item) => {
-    const label = item.file || item.sourceFile || item.id;
+    const label = item.originalName || item.file || item.sourceFile || item.id;
     if (!confirm(`Delete "${label}"?`)) return;
     await api(`/api/media/${item.id}`, { method: 'DELETE' });
     loadMedia();
@@ -284,7 +284,7 @@ function MediaRow({ item, isToggling, onToggle, onRemove, onDurationChange }) {
   const status = item.status || 'ready';
   const isReady = status === 'ready';
   const previewUrl = item.file ? `${API_BASE}/media/${item.file}` : '';
-  const fileLabel = item.file || item.sourceFile || 'pending';
+  const fileLabel = item.originalName || item.file || item.sourceFile || 'pending';
 
   const saveDuration = () => {
     onDurationChange(item, dur);
