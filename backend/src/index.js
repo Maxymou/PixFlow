@@ -375,52 +375,56 @@ async function callHotspotHostApi(routePath, options = {}) {
     throw new Error('HOTSPOT_HOST_API_URL is not configured');
   }
 
-  const base = hotspotHostApiUrl.replace(/\/$/, '');
-  const response = await fetch(`${base}${routePath}`, {
+  const baseUrl = hotspotHostApiUrl.replace(/\/+$/, '');
+  const response = await fetch(`${baseUrl}${routePath}`, {
+    method: options.method || 'GET',
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers || {}),
     },
-    ...options,
+    body: options.body ? JSON.stringify(options.body) : undefined,
   });
 
   const rawText = await response.text();
-  let payload;
+  let payload = null;
   try {
-    payload = rawText ? JSON.parse(rawText) : {};
+    payload = rawText ? JSON.parse(rawText) : null;
   } catch {
-    throw new Error(`Host hotspot API returned invalid JSON (${response.status}): ${rawText.slice(0, 300)}`);
+    throw new Error(`Invalid hotspot host API response: ${rawText}`);
   }
 
   if (!response.ok) {
-    const message = typeof payload?.error === 'string' ? payload.error : `Host hotspot API error (${response.status})`;
-    const error = new Error(message);
-    error.payload = payload;
-    throw error;
+    throw new Error(payload?.error || `Hotspot host API failed with status ${response.status}`);
   }
 
   return payload;
 }
 
 async function getHotspotStatus() {
-  const backend = await detectHotspotControlBackend();
-  if (!backend) throw new Error('No hotspot control backend available');
-
-  if (backend === 'host-api') {
-    return normalizeHotspotStatus(await callHotspotHostApi('/status'));
+  if (hotspotHostApiUrl) {
+    const status = await callHotspotHostApi('/status');
+    return {
+      available: Boolean(status.available),
+      enabled: Boolean(status.enabled),
+      error: typeof status.error === 'string' ? status.error : '',
+    };
   }
+
+  const backend = await detectHotspotControlBackend();
 
   if (backend === 'helper') {
     const { stdout } = await runHotspotHelper('status');
-    const parsed = parseHotspotHelperStatus(stdout);
-    if (!parsed) throw new Error('Hotspot helper returned invalid JSON status');
-    return parsed;
+    const status = parseHotspotHelperStatus(stdout);
+    if (!status) {
+      throw new Error('Invalid hotspot helper status response');
+    }
+    return status;
   }
 
   return {
-    available: true,
+    available: Boolean(backend),
     enabled: hotspotEnabledRuntime,
-    error: '',
+    error: backend ? '' : 'No hotspot control backend available',
   };
 }
 
@@ -446,23 +450,27 @@ async function isEthernetConnected() {
 }
 
 async function enableHotspot() {
+  if (hotspotHostApiUrl) {
+    await callHotspotHostApi('/enable', { method: 'POST' });
+    const status = await getHotspotStatus();
+    hotspotEnabledRuntime = status.enabled;
+    return;
+  }
+
   const backend = await detectHotspotControlBackend();
   if (!backend) throw new Error('No hotspot control backend available');
 
-  if (backend === 'host-api') {
-    await callHotspotHostApi('/enable', { method: 'POST' });
-    return getHotspotStatus();
-  }
-
   if (backend === 'helper') {
     await runHotspotHelper('enable');
-    return getHotspotStatus();
+    const status = await getHotspotStatus();
+    hotspotEnabledRuntime = status.enabled;
+    return;
   }
 
   if (backend === 'nmcli') {
     await runCommand('nmcli', ['connection', 'up', hotspotConnectionName]);
     hotspotEnabledRuntime = true;
-    return { available: true, enabled: true, error: '' };
+    return;
   }
 
   try {
@@ -473,27 +481,30 @@ async function enableHotspot() {
     await runCommand('sudo', ['systemctl', 'start', 'dnsmasq']);
   }
   hotspotEnabledRuntime = true;
-  return { available: true, enabled: true, error: '' };
 }
 
 async function disableHotspot() {
+  if (hotspotHostApiUrl) {
+    await callHotspotHostApi('/disable', { method: 'POST' });
+    const status = await getHotspotStatus();
+    hotspotEnabledRuntime = status.enabled;
+    return;
+  }
+
   const backend = await detectHotspotControlBackend();
   if (!backend) throw new Error('No hotspot control backend available');
 
-  if (backend === 'host-api') {
-    await callHotspotHostApi('/disable', { method: 'POST' });
-    return getHotspotStatus();
-  }
-
   if (backend === 'helper') {
     await runHotspotHelper('disable');
-    return getHotspotStatus();
+    const status = await getHotspotStatus();
+    hotspotEnabledRuntime = status.enabled;
+    return;
   }
 
   if (backend === 'nmcli') {
     await runCommand('nmcli', ['connection', 'down', hotspotConnectionName]);
     hotspotEnabledRuntime = false;
-    return { available: true, enabled: false, error: '' };
+    return;
   }
 
   try {
@@ -504,7 +515,6 @@ async function disableHotspot() {
     await runCommand('sudo', ['systemctl', 'stop', 'dnsmasq']);
   }
   hotspotEnabledRuntime = false;
-  return { available: true, enabled: false, error: '' };
 }
 
 async function configureHotspot(ssid, password) {
@@ -514,7 +524,7 @@ async function configureHotspot(ssid, password) {
   if (backend === 'host-api') {
     await callHotspotHostApi('/configure', {
       method: 'POST',
-      body: JSON.stringify({ ssid, password }),
+      body: { ssid, password },
     });
     return getHotspotStatus();
   }
@@ -537,17 +547,15 @@ const buildSettingsResponse = async () => {
   const wifi = settings.wifi || {};
   let hotspotEnabled = hotspotEnabledRuntime;
   let hotspotAvailable = false;
-  const backend = await detectHotspotControlBackend();
-
-  if (backend) {
-    try {
-      const status = await getHotspotStatus();
+  try {
+    const status = await getHotspotStatus();
+    if (status.available) {
       hotspotEnabled = status.enabled;
-      hotspotAvailable = status.available;
+      hotspotAvailable = true;
       hotspotEnabledRuntime = status.enabled;
-    } catch (error) {
-      console.warn('[PixFlow] Unable to read hotspot status:', error.message);
     }
+  } catch (error) {
+    console.warn('[PixFlow] Unable to read hotspot status:', error.message);
   }
 
   return {
@@ -777,12 +785,26 @@ app.patch('/settings/wifi', async (req, res, next) => {
 
     await writeJson(settingsFile, settings);
 
-    const backend = await detectHotspotControlBackend();
-    if (backend === 'host-api' || backend === 'helper') {
+    if (hotspotHostApiUrl) {
       try {
-        await configureHotspot(trimmedSsid, password);
+        await callHotspotHostApi('/configure', {
+          method: 'POST',
+          body: {
+            ssid: trimmedSsid,
+            password,
+          },
+        });
       } catch (error) {
-        console.warn('[PixFlow] Failed to apply hotspot configuration:', error.message);
+        console.warn('[PixFlow] Hotspot host API error:', error.message);
+      }
+    } else {
+      const backend = await detectHotspotControlBackend();
+      if (backend === 'helper') {
+        try {
+          await configureHotspot(trimmedSsid, password);
+        } catch (error) {
+          console.warn('[PixFlow] Failed to apply hotspot configuration:', error.message);
+        }
       }
     }
 
@@ -797,7 +819,12 @@ app.patch('/settings/hotspot', async (req, res, next) => {
       return res.status(400).json({ error: 'enabled must be a boolean' });
     }
 
-    const status = enabled ? await enableHotspot() : await disableHotspot();
+    if (enabled) await enableHotspot();
+    else await disableHotspot();
+    const status = await getHotspotStatus();
+    if (!status.available) {
+      throw new Error(status.error || 'Hotspot unavailable');
+    }
     hotspotEnabledRuntime = status.enabled;
 
     res.json(await buildSettingsResponse());
@@ -827,13 +854,16 @@ app.use((error, _req, res, _next) => {
 });
 
 ensureFiles().then(() => {
+  if (hotspotHostApiUrl) {
+    console.log(`[PixFlow] Using hotspot host API: ${hotspotHostApiUrl}`);
+  }
   console.log('[PixFlow] Ensuring hotspot is enabled on startup');
   detectHotspotControlBackend()
     .then((backend) => {
       if (!backend) {
         throw new Error('No hotspot control backend available');
       }
-      if (backend === 'host-api') {
+      if (hotspotHostApiUrl) {
         return callHotspotHostApi('/ensure', { method: 'POST' });
       }
       if (backend === 'helper') {
@@ -851,6 +881,9 @@ ensureFiles().then(() => {
       console.log('[PixFlow] Hotspot enabled on startup');
     })
     .catch((error) => {
+      if (hotspotHostApiUrl) {
+        console.warn('[PixFlow] Hotspot host API error:', error.message);
+      }
       console.warn('[PixFlow] Unable to enable hotspot on startup:', error.message);
     });
 
