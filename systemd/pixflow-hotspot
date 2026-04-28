@@ -11,7 +11,10 @@ log() {
 }
 
 json_escape() {
-  printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'
+  printf '%s' "$1" | sed \
+    -e 's/\\/\\\\/g' \
+    -e 's/"/\\"/g' \
+    -e ':a;N;$!ba;s/\n/\\n/g'
 }
 
 has_nmcli() {
@@ -108,12 +111,12 @@ PY
 
 require_prerequisites() {
   if ! has_nmcli; then
-    echo "{\"available\":false,\"enabled\":false,\"error\":$(json_escape "nmcli is not installed")}"
+    echo "{\"available\":false,\"enabled\":false,\"error\":\"$(json_escape "nmcli is not installed")\"}"
     exit 0
   fi
 
   if ! has_wifi_interface; then
-    echo "{\"available\":false,\"enabled\":false,\"error\":$(json_escape "Wi-Fi interface $WIFI_INTERFACE not found")}"
+    echo "{\"available\":false,\"enabled\":false,\"error\":\"$(json_escape "Wi-Fi interface $WIFI_INTERFACE not found")\"}"
     exit 0
   fi
 }
@@ -141,12 +144,12 @@ ensure_connection() {
 
 cmd_status() {
   if ! has_nmcli; then
-    echo "{\"available\":false,\"enabled\":false,\"error\":$(json_escape "nmcli is not installed")}"
+    echo "{\"available\":false,\"enabled\":false,\"error\":\"$(json_escape "nmcli is not installed")\"}"
     return 0
   fi
 
   if ! has_wifi_interface; then
-    echo "{\"available\":false,\"enabled\":false,\"error\":$(json_escape "Wi-Fi interface $WIFI_INTERFACE not found")}"
+    echo "{\"available\":false,\"enabled\":false,\"error\":\"$(json_escape "Wi-Fi interface $WIFI_INTERFACE not found")\"}"
     return 0
   fi
 
@@ -155,7 +158,7 @@ cmd_status() {
     enabled=true
   fi
 
-  echo "{\"available\":true,\"enabled\":${enabled},\"connection\":$(json_escape "$CONNECTION_NAME"),\"wifiInterface\":$(json_escape "$WIFI_INTERFACE")}"
+  echo "{\"available\":true,\"enabled\":${enabled},\"connection\":\"$(json_escape "$CONNECTION_NAME")\",\"wifiInterface\":\"$(json_escape "$WIFI_INTERFACE")\"}"
 }
 
 cmd_ensure() {
