@@ -25,6 +25,7 @@ export function PlayerView() {
   const videoRef = useRef(null);
   const videoLoadTimeoutRef = useRef(null);
   const videoRecoveryAttemptsRef = useRef(0);
+  const videoBufferingTimeoutRef = useRef(null);
 
   const clearRetry = useCallback(() => {
     if (retryTimeoutRef.current) {
@@ -40,12 +41,29 @@ export function PlayerView() {
     }
   }, []);
 
+  const clearVideoBufferingTimeout = useCallback(() => {
+    if (videoBufferingTimeoutRef.current) {
+      clearTimeout(videoBufferingTimeoutRef.current);
+      videoBufferingTimeoutRef.current = null;
+    }
+  }, []);
+
+  const markVideoReady = useCallback(() => {
+    setVideoReady(true);
+    setIsVideoLoading(false);
+    setVideoLoadMessage('');
+    videoRecoveryAttemptsRef.current = 0;
+    clearVideoLoadTimeout();
+    clearVideoBufferingTimeout();
+  }, [clearVideoBufferingTimeout, clearVideoLoadTimeout]);
+
   const markMediaFailed = useCallback((item, itemSourceIndex) => {
     if (!item || itemSourceIndex < 0) return;
     clearVideoLoadTimeout();
+    clearVideoBufferingTimeout();
     const key = `${item.file}-${itemSourceIndex}`;
     setFailedMedia((current) => ({ ...current, [key]: true }));
-  }, [clearVideoLoadTimeout]);
+  }, [clearVideoBufferingTimeout, clearVideoLoadTimeout]);
 
   const next = useCallback((activePlaylistLength) => {
     setIndex((prev) => {
@@ -59,6 +77,11 @@ export function PlayerView() {
     videoLoadTimeoutRef.current = setTimeout(() => {
       const video = videoRef.current;
       if (!video) return;
+
+      if (video.readyState >= 2 && !video.paused && !video.ended) {
+        markVideoReady();
+        return;
+      }
 
       setIsVideoLoading(true);
       setVideoLoadMessage('La vidéo met trop de temps à démarrer...');
@@ -89,7 +112,7 @@ export function PlayerView() {
         next(activePlaylistLength);
       }
     }, VIDEO_START_TIMEOUT_MS);
-  }, [clearVideoLoadTimeout, markMediaFailed, next]);
+  }, [clearVideoLoadTimeout, markMediaFailed, markVideoReady, next]);
 
   const loadPlaylist = useCallback(async () => {
     try {
@@ -130,8 +153,9 @@ export function PlayerView() {
       clearInterval(id);
       clearRetry();
       clearVideoLoadTimeout();
+      clearVideoBufferingTimeout();
     };
-  }, [clearRetry, clearVideoLoadTimeout, loadPlaylist]);
+  }, [clearRetry, clearVideoBufferingTimeout, clearVideoLoadTimeout, loadPlaylist]);
 
   useEffect(() => {
     setFailedMedia((current) => {
@@ -185,6 +209,7 @@ export function PlayerView() {
       setVideoLoadMessage('Chargement de la vidéo...');
       videoRecoveryAttemptsRef.current = 0;
       clearVideoLoadTimeout();
+      clearVideoBufferingTimeout();
       return;
     }
 
@@ -192,8 +217,9 @@ export function PlayerView() {
     setVideoReady(false);
     setVideoLoadMessage('Chargement de la vidéo...');
     videoRecoveryAttemptsRef.current = 0;
+    clearVideoBufferingTimeout();
     startVideoLoadTimeout(currentItem, currentSourceIndex, activePlaylist.length);
-  }, [activePlaylist.length, clearVideoLoadTimeout, currentItem, currentSourceIndex, startVideoLoadTimeout]);
+  }, [activePlaylist.length, clearVideoBufferingTimeout, clearVideoLoadTimeout, currentItem, currentSourceIndex, startVideoLoadTimeout]);
 
   useEffect(() => {
     if (currentItem?.type !== 'video') return;
@@ -295,10 +321,16 @@ export function PlayerView() {
             setIsVideoLoading(true);
             setVideoReady(false);
             setVideoLoadMessage('Chargement de la vidéo...');
+            clearVideoBufferingTimeout();
             startVideoLoadTimeout(currentItem, currentSourceIndex, activePlaylist.length);
+          }}
+          onLoadedData={() => {
+            console.log('Video loadeddata:', currentUrl);
+            markVideoReady();
           }}
           onCanPlay={() => {
             console.log('Video canplay:', currentUrl);
+            markVideoReady();
             const playPromise = videoRef.current?.play();
             if (playPromise?.catch) {
               playPromise.catch((error) => {
@@ -308,20 +340,25 @@ export function PlayerView() {
           }}
           onCanPlayThrough={() => {
             console.log('Video canplaythrough:', currentUrl);
+            markVideoReady();
           }}
           onPlaying={() => {
             console.log('Video playing:', currentUrl);
-            setVideoReady(true);
-            setIsVideoLoading(false);
-            setVideoLoadMessage('');
-            videoRecoveryAttemptsRef.current = 0;
-            clearVideoLoadTimeout();
+            markVideoReady();
           }}
           onWaiting={() => {
             console.warn('Video waiting/buffering:', currentUrl);
-            setIsVideoLoading(true);
-            setVideoLoadMessage('Mise en mémoire tampon de la vidéo...');
-            startVideoLoadTimeout(currentItem, currentSourceIndex, activePlaylist.length);
+            clearVideoBufferingTimeout();
+            videoBufferingTimeoutRef.current = setTimeout(() => {
+              const video = videoRef.current;
+              if (!video || video.readyState >= 2) {
+                markVideoReady();
+                return;
+              }
+              setIsVideoLoading(true);
+              setVideoLoadMessage('Mise en mémoire tampon de la vidéo...');
+              startVideoLoadTimeout(currentItem, currentSourceIndex, activePlaylist.length);
+            }, 3_000);
           }}
           onStalled={() => {
             console.warn('Video stalled:', currentUrl);
