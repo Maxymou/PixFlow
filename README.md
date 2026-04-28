@@ -180,14 +180,68 @@ If backend runs as non-root on host, configure minimal sudoers rules (example):
 maxymou ALL=(root) NOPASSWD: /usr/bin/nmcli connection up PixFlow-Hotspot, /usr/bin/nmcli connection down PixFlow-Hotspot
 ```
 
-## Ouverture de l’administration via le hotspot
+## Portail captif PixFlow
 
-Après connexion au Wi-Fi PixFlow, certains téléphones peuvent afficher automatiquement une page de connexion au réseau.
+En mode Raspberry Pi, PixFlow installe un portail captif local.
 
-Cette page permet d’ouvrir l’administration PixFlow.
+Quand un téléphone se connecte au hotspot Wi-Fi PixFlow, iOS/Android/Windows peuvent ouvrir automatiquement une page de connexion au réseau permettant d’accéder à l’administration PixFlow.
 
-Si la page ne s’ouvre pas automatiquement, ouvrir manuellement :
+Adresse de l’administration :
 
+```txt
 http://10.42.0.1:3000
+```
 
-L’ouverture automatique dépend du comportement d’iOS, Android ou Windows.
+Le portail captif repose sur :
+
+- NetworkManager en mode hotspot partagé ;
+- dnsmasq lancé par NetworkManager ;
+- une configuration DNS installée dans `/etc/NetworkManager/dnsmasq-shared.d/pixflow-captive.conf` ;
+- le service `pixflow-captive-portal.service`.
+
+### Vérifications
+
+```bash
+/usr/local/bin/pixflow-hotspot status
+
+sudo systemctl status pixflow-hotspot.service --no-pager -l
+sudo systemctl status pixflow-hotspot-api.service --no-pager -l
+sudo systemctl status pixflow-captive-portal.service --no-pager -l
+
+dig @10.42.0.1 captive.apple.com +short
+dig @10.42.0.1 connectivitycheck.gstatic.com +short
+dig @10.42.0.1 www.msftconnecttest.com +short
+```
+
+Résultat DNS attendu :
+
+```txt
+10.42.0.1
+10.42.0.1
+10.42.0.1
+```
+
+Test HTTP :
+
+```bash
+curl -i http://127.0.0.1/hotspot-detect.html
+curl -i http://127.0.0.1/generate_204
+curl -i http://127.0.0.1/
+```
+
+Si l’ouverture automatique ne se déclenche pas, ouvrir manuellement :
+
+```txt
+http://10.42.0.1:3000
+```
+
+### Retour arrière DNS captive
+
+En cas de problème avec le portail captif :
+
+```bash
+sudo rm /etc/NetworkManager/dnsmasq-shared.d/pixflow-captive.conf
+sudo systemctl restart NetworkManager
+sleep 5
+sudo /usr/local/bin/pixflow-hotspot ensure
+```

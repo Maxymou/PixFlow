@@ -44,7 +44,7 @@ if [ "$MODE" = "prod" ]; then
   INSTALL_KIOSK=${INSTALL_KIOSK:-Y}
 
   sudo apt-get update
-  sudo apt-get install -y network-manager
+  sudo apt-get install -y network-manager dnsutils
 
   # Migration: remove legacy containerized hotspot that conflicts with NetworkManager.
   docker compose --profile prod stop system 2>/dev/null || true
@@ -52,6 +52,11 @@ if [ "$MODE" = "prod" ]; then
   docker stop pixflow-system 2>/dev/null || true
   docker rm pixflow-system 2>/dev/null || true
   sudo pkill -f "dnsmasq -k" || true
+
+  sudo install -d -m 755 /etc/NetworkManager/dnsmasq-shared.d
+  sudo install -m 644 "$ROOT_DIR/systemd/pixflow-captive-dnsmasq.conf" /etc/NetworkManager/dnsmasq-shared.d/pixflow-captive.conf
+  sudo systemctl restart NetworkManager
+  sleep 5
 
   sudo install -m 755 "$ROOT_DIR/systemd/pixflow-hotspot" /usr/local/bin/pixflow-hotspot
   sudo install -m 755 "$ROOT_DIR/systemd/pixflow-hotspot-api" /usr/local/bin/pixflow-hotspot-api
