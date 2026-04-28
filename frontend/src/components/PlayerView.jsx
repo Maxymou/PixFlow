@@ -439,7 +439,7 @@ export function PlayerView() {
         />
       )}
 
-      {currentItem.type === 'video' && (isVideoLoading || !videoReady) && (
+      {currentItem.type === 'video' && isVideoLoading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/85 px-8 text-center text-slate-100">
           <div className="flex flex-col items-center">
             <p className="text-2xl font-semibold tracking-wide md:text-3xl">PixFlow</p>
