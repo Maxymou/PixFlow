@@ -644,11 +644,13 @@ app.post('/media/upload', upload.single('file'), async (req, res, next) => {
     const inputPath = path.join(incomingDir, req.file.filename);
     const isVideo = mediaTypeFromName(req.file.originalname, req.file.mimetype) === 'video';
 
+    const originalName = path.basename(req.file.originalname || '');
+
     const item = {
       id: nanoid(),
       projectId,
       type: isVideo ? 'video' : 'image',
-      originalName: req.file.originalname,
+      originalName,
       file: null,
       active: true,
       duration: Number(duration || 5),
