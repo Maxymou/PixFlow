@@ -1,0 +1,16 @@
+[Unit]
+Description=PixFlow Captive Portal
+After=network-online.target pixflow-hotspot.service
+Wants=network-online.target
+Requires=pixflow-hotspot.service
+
+[Service]
+Type=simple
+User=root
+Environment=PIXFLOW_ADMIN_URL=http://10.42.0.1:3000
+ExecStart=/usr/local/bin/pixflow-captive-portal
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
