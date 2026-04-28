@@ -36,20 +36,6 @@ services:
     environment:
       - DISPLAY=:0
 
-  system:
-    build: ./system
-    profiles: ["prod"]
-    container_name: pixflow-system
-    restart: unless-stopped
-    network_mode: host
-    privileged: true
-    cap_add:
-      - NET_ADMIN
-    environment:
-      - WLAN_IFACE=wlan0
-      - SSID=EVENT_WIFI
-      - PASSPHRASE=eventwifi123
-
 networks:
   pixflow:
     driver: bridge

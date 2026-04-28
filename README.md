@@ -5,12 +5,12 @@ PixFlow is an offline-first digital signage stack with Dockerized backend/fronte
 ## Services and profiles
 - **backend** (`:4000`) - always enabled.
 - **frontend** (`:3000`) - always enabled.
-- **system** (hotspot helper) - enabled by Docker `prod` profile.
 - **player** (Chromium in Docker) - **disabled by default** and now only available through the optional `docker-player` profile.
 
 ## Recommended Raspberry Pi PROD architecture
-- Docker: `backend`, `frontend`, `system` (`--profile prod`)
+- Docker: `backend`, `frontend`
 - Host systemd kiosk: Chromium launcher on Raspberry Pi host (not in Docker)
+- Host NetworkManager hotspot helper: `/usr/local/bin/pixflow-hotspot`
 
 This avoids X11/display issues on Raspberry Pi OS Lite where no desktop session exists inside containers.
 
@@ -146,7 +146,13 @@ ip link
 sudo rfkill unblock wifi
 ```
 
-If the hotspot container reports that `wlan0` is missing, ensure your Raspberry Pi hardware exposes Wi-Fi and that rfkill is unblocked before starting PROD mode.
+If the hotspot does not start, ensure your Raspberry Pi hardware exposes Wi-Fi and that rfkill is unblocked before starting PROD mode.
+
+## Hotspot Wi-Fi
+
+PixFlow utilise NetworkManager via `/usr/local/bin/pixflow-hotspot`.
+
+Ne pas lancer l’ancien service Docker `pixflow-system` en même temps, car il utilise `dnsmasq` sur les ports 53/67 et empêche NetworkManager de démarrer le hotspot.
 
 ## Hotspot runtime control (PixFlow settings menu)
 
