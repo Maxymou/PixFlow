@@ -163,6 +163,9 @@ The PixFlow settings panel can now temporarily enable/disable the hotspot at run
   - `wifi.ethernetConnected`
 - `PATCH /api/settings/hotspot` with `{ "enabled": true|false }`
 
+The host helper API (`pixflow-hotspot-api`) listens on port `4876` for localhost and Docker bridge traffic.  
+Do **not** publish/expose this port to external networks (router/NAT/public interfaces).
+
 Startup behavior is intentionally fail-safe: PixFlow backend always tries to re-enable hotspot on startup.  
 So disabling from the UI is **temporary** and does not persist across Raspberry Pi reboot/app restart.
 
