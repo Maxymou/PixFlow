@@ -45,6 +45,14 @@ if [ "$MODE" = "prod" ]; then
 
   sudo apt-get update
   sudo apt-get install -y network-manager
+
+  # Migration: remove legacy containerized hotspot that conflicts with NetworkManager.
+  docker compose --profile prod stop system 2>/dev/null || true
+  docker compose --profile prod rm -f system 2>/dev/null || true
+  docker stop pixflow-system 2>/dev/null || true
+  docker rm pixflow-system 2>/dev/null || true
+  sudo pkill -f "dnsmasq -k" || true
+
   sudo install -m 755 "$ROOT_DIR/systemd/pixflow-hotspot" /usr/local/bin/pixflow-hotspot
 
   sudo tee /etc/sudoers.d/pixflow-hotspot >/dev/null <<EOF
@@ -58,7 +66,7 @@ EOF
   sudo systemctl enable pixflow-hotspot.service
   sudo systemctl restart pixflow-hotspot.service
 
-  docker compose --profile prod up -d --build
+  docker compose up -d --build backend frontend
 
   case "$INSTALL_KIOSK" in
     [Yy]|[Yy][Ee][Ss])

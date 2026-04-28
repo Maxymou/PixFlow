@@ -30,6 +30,14 @@ connection_is_active() {
   nmcli -t -f NAME connection show --active | grep -Fxq "$CONNECTION_NAME"
 }
 
+legacy_dnsmasq_running() {
+  pgrep -af "dnsmasq -k" >/dev/null
+}
+
+legacy_dnsmasq_on_hotspot_ports() {
+  ss -lnup 2>/dev/null | grep -E ':(53|67)\b' | grep -q "dnsmasq"
+}
+
 discover_settings_file() {
   local candidates=()
   if [[ -n "${PIXFLOW_SETTINGS_FILE:-}" ]]; then
@@ -152,6 +160,11 @@ cmd_status() {
 
 cmd_ensure() {
   require_prerequisites
+  if legacy_dnsmasq_running && legacy_dnsmasq_on_hotspot_ports; then
+    log "Stopping legacy dnsmasq hotspot process..."
+    pkill -f "dnsmasq -k" || true
+    sleep 1
+  fi
   local creds ssid password
   creds=$(load_wifi_credentials)
   ssid=$(printf '%s' "$creds" | sed -n '1p')
