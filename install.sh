@@ -54,6 +54,7 @@ if [ "$MODE" = "prod" ]; then
   sudo pkill -f "dnsmasq -k" || true
 
   sudo install -m 755 "$ROOT_DIR/systemd/pixflow-hotspot" /usr/local/bin/pixflow-hotspot
+  sudo install -m 755 "$ROOT_DIR/systemd/pixflow-hotspot-api" /usr/local/bin/pixflow-hotspot-api
 
   sudo tee /etc/sudoers.d/pixflow-hotspot >/dev/null <<EOF
 ${INSTALL_USER} ALL=(root) NOPASSWD: /usr/local/bin/pixflow-hotspot *
@@ -62,9 +63,12 @@ EOF
   sudo visudo -cf /etc/sudoers.d/pixflow-hotspot
 
   sudo cp "$ROOT_DIR/systemd/pixflow-hotspot.service" /etc/systemd/system/pixflow-hotspot.service
+  sudo cp "$ROOT_DIR/systemd/pixflow-hotspot-api.service" /etc/systemd/system/pixflow-hotspot-api.service
   sudo systemctl daemon-reload
   sudo systemctl enable pixflow-hotspot.service
   sudo systemctl restart pixflow-hotspot.service
+  sudo systemctl enable pixflow-hotspot-api.service
+  sudo systemctl restart pixflow-hotspot-api.service
 
   docker compose up -d --build backend frontend
 
