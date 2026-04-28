@@ -140,12 +140,14 @@ function ProjectRow({ project, isToggling, onToggle, onDelete }) {
 
       {/* Actions */}
       <div className="flex flex-shrink-0 items-center gap-1.5">
-        <ToggleSwitch
-          checked={project.active}
-          disabled={isToggling}
-          ariaLabel={`Set project ${project.name} as ${project.active ? 'inactive' : 'active'}`}
-          onChange={() => onToggle(project)}
-        />
+        <div className="mr-2">
+          <ToggleSwitch
+            checked={project.active}
+            disabled={isToggling}
+            ariaLabel={`Set project ${project.name} as ${project.active ? 'inactive' : 'active'}`}
+            onChange={() => onToggle(project)}
+          />
+        </div>
         <Link to={`/projects/${project.id}`} className="btn-violet">
           Manage
         </Link>
