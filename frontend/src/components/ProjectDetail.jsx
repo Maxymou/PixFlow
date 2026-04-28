@@ -155,23 +155,25 @@ export function ProjectDetail({ projects, onRefresh }) {
           ← Back
         </Link>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-xl font-semibold text-slate-100">
-            {project?.name ?? 'Project'}
-          </h2>
+          <div className="flex min-w-0 items-center gap-2">
+            <h2 className="truncate text-xl font-semibold text-slate-100">
+              {project?.name ?? 'Project'}
+            </h2>
+            <span className={project?.active ? 'badge-active' : 'badge-inactive'}>
+              {project?.active ? 'Live' : 'Inactive'}
+            </span>
+          </div>
           <p className="text-xs text-slate-500">
             {activeCount}/{media.length} media active
           </p>
         </div>
-        <div className="ml-auto flex flex-shrink-0 items-center gap-2">
+        <div className="ml-auto flex flex-shrink-0 items-center">
           <ToggleSwitch
             checked={Boolean(project?.active)}
             disabled={!project || togglingProject}
             ariaLabel={`Set project ${project?.name ?? 'project'} as ${project?.active ? 'inactive' : 'active'}`}
             onChange={toggleProject}
           />
-          <span className={project?.active ? 'badge-active' : 'badge-inactive'}>
-            {project?.active ? 'Live' : 'Inactive'}
-          </span>
         </div>
       </div>
 
