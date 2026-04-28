@@ -113,19 +113,25 @@ export function UserMenu({ open, onClose }) {
     setIsHotspotSaving(true);
 
     try {
+      const previousHotspotState = hotspot;
       const updated = await api('/api/settings/hotspot', {
         method: 'PATCH',
         body: JSON.stringify({ enabled: nextEnabled }),
       });
 
+      const realEnabled = updated?.wifi?.hotspotEnabled ?? previousHotspotState.enabled;
+      const ethernetConnected = updated?.wifi?.ethernetConnected ?? previousHotspotState.ethernetConnected;
       setHotspot({
-        enabled: updated?.wifi?.hotspotEnabled ?? nextEnabled,
-        ethernetConnected: updated?.wifi?.ethernetConnected ?? hotspot.ethernetConnected,
+        enabled: realEnabled,
+        ethernetConnected,
       });
 
-      if (nextEnabled) {
+      if (!nextEnabled && realEnabled) {
+        setStatusMessage('');
+        setErrorMessage('Le hotspot est toujours actif. Désactivation impossible.');
+      } else if (nextEnabled) {
         setStatusMessage('Hotspot Wi-Fi activé.');
-      } else if (hotspot.ethernetConnected) {
+      } else if (ethernetConnected) {
         setStatusMessage('Hotspot Wi-Fi désactivé.');
       } else {
         setStatusMessage('Hotspot Wi-Fi désactivé. La connexion peut être perdue.');
