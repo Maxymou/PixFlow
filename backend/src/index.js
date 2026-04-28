@@ -345,6 +345,7 @@ const parseHotspotHelperStatus = (stdout) => {
     return {
       available: Boolean(parsed.available),
       enabled: Boolean(parsed.enabled),
+      error: typeof parsed.error === 'string' ? parsed.error : '',
     };
   } catch {
     return null;
@@ -352,10 +353,15 @@ const parseHotspotHelperStatus = (stdout) => {
 };
 
 const getHotspotStatusFromHelper = async () => {
-  const { stdout } = await runHotspotHelper('status');
+  const { stdout, stderr } = await runHotspotHelper('status');
   const status = parseHotspotHelperStatus(stdout);
   if (!status || !status.available) {
-    throw new Error('Hotspot helper returned unavailable status');
+    const details = [
+      status?.error ? `helper_error=${status.error}` : null,
+      stdout.trim() ? `stdout=${stdout.trim()}` : null,
+      stderr.trim() ? `stderr=${stderr.trim()}` : null,
+    ].filter(Boolean).join(' | ');
+    throw new Error(details ? `Hotspot helper returned unavailable status (${details})` : 'Hotspot helper returned unavailable status');
   }
   hotspotEnabledRuntime = status.enabled;
   return status.enabled;
