@@ -179,3 +179,15 @@ If backend runs as non-root on host, configure minimal sudoers rules (example):
 ```bash
 maxymou ALL=(root) NOPASSWD: /usr/bin/nmcli connection up PixFlow-Hotspot, /usr/bin/nmcli connection down PixFlow-Hotspot
 ```
+
+## Ouverture de l’administration via le hotspot
+
+Après connexion au Wi-Fi PixFlow, certains téléphones peuvent afficher automatiquement une page de connexion au réseau.
+
+Cette page permet d’ouvrir l’administration PixFlow.
+
+Si la page ne s’ouvre pas automatiquement, ouvrir manuellement :
+
+http://10.42.0.1:3000
+
+L’ouverture automatique dépend du comportement d’iOS, Android ou Windows.

@@ -55,6 +55,7 @@ if [ "$MODE" = "prod" ]; then
 
   sudo install -m 755 "$ROOT_DIR/systemd/pixflow-hotspot" /usr/local/bin/pixflow-hotspot
   sudo install -m 755 "$ROOT_DIR/systemd/pixflow-hotspot-api" /usr/local/bin/pixflow-hotspot-api
+  sudo install -m 755 "$ROOT_DIR/systemd/pixflow-captive-portal" /usr/local/bin/pixflow-captive-portal
 
   sudo tee /etc/sudoers.d/pixflow-hotspot >/dev/null <<EOF
 ${INSTALL_USER} ALL=(root) NOPASSWD: /usr/local/bin/pixflow-hotspot *
@@ -64,11 +65,14 @@ EOF
 
   sudo cp "$ROOT_DIR/systemd/pixflow-hotspot.service" /etc/systemd/system/pixflow-hotspot.service
   sudo cp "$ROOT_DIR/systemd/pixflow-hotspot-api.service" /etc/systemd/system/pixflow-hotspot-api.service
+  sudo cp "$ROOT_DIR/systemd/pixflow-captive-portal.service" /etc/systemd/system/pixflow-captive-portal.service
   sudo systemctl daemon-reload
   sudo systemctl enable pixflow-hotspot.service
   sudo systemctl restart pixflow-hotspot.service
   sudo systemctl enable pixflow-hotspot-api.service
   sudo systemctl restart pixflow-hotspot-api.service
+  sudo systemctl enable pixflow-captive-portal.service
+  sudo systemctl restart pixflow-captive-portal.service
 
   docker compose up -d --build backend frontend
 
