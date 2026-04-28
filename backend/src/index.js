@@ -351,6 +351,16 @@ const parseHotspotHelperStatus = (stdout) => {
   }
 };
 
+const getHotspotStatusFromHelper = async () => {
+  const { stdout } = await runHotspotHelper('status');
+  const status = parseHotspotHelperStatus(stdout);
+  if (!status || !status.available) {
+    throw new Error('Hotspot helper returned unavailable status');
+  }
+  hotspotEnabledRuntime = status.enabled;
+  return status.enabled;
+};
+
 async function isEthernetConnected() {
   try {
     const interfaces = await fs.readdir('/sys/class/net');
@@ -676,13 +686,23 @@ app.patch('/settings/hotspot', async (req, res, next) => {
       return res.status(400).json({ error: 'enabled must be a boolean' });
     }
 
+    const backend = await detectHotspotControlBackend();
+    if (!backend) {
+      throw new Error('No hotspot control backend available');
+    }
+
     if (enabled) {
       await enableHotspot();
     } else {
       await disableHotspot();
     }
 
-    hotspotEnabledRuntime = enabled;
+    if (backend === 'helper') {
+      await getHotspotStatusFromHelper();
+    } else {
+      hotspotEnabledRuntime = enabled;
+    }
+
     res.json(await buildSettingsResponse());
   } catch (error) {
     console.error('[PixFlow] Failed to toggle hotspot:', error);
