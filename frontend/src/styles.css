@@ -106,7 +106,6 @@ body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
   background: #272727;
   border-radius: 9999px;
   box-sizing: border-box;
-  box-shadow: 0 0 16px -8px #fefefe;
   transition: opacity 0.2s ease;
 }
 
