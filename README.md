@@ -147,3 +147,26 @@ sudo rfkill unblock wifi
 ```
 
 If the hotspot container reports that `wlan0` is missing, ensure your Raspberry Pi hardware exposes Wi-Fi and that rfkill is unblocked before starting PROD mode.
+
+## Hotspot runtime control (PixFlow settings menu)
+
+The PixFlow settings panel can now temporarily enable/disable the hotspot at runtime via backend API:
+
+- `GET /api/settings` includes:
+  - `wifi.hotspotEnabled`
+  - `wifi.ethernetConnected`
+- `PATCH /api/settings/hotspot` with `{ "enabled": true|false }`
+
+Startup behavior is intentionally fail-safe: PixFlow backend always tries to re-enable hotspot on startup.  
+So disabling from the UI is **temporary** and does not persist across Raspberry Pi reboot/app restart.
+
+By default, backend hotspot commands try:
+
+1. `nmcli connection up|down PixFlow-Hotspot` (override with `HOTSPOT_CONNECTION_NAME`)
+2. fallback to `systemctl start|stop hostapd dnsmasq` (or `sudo systemctl ...`)
+
+If backend runs as non-root on host, configure minimal sudoers rules (example):
+
+```bash
+maxymou ALL=(root) NOPASSWD: /usr/bin/nmcli connection up PixFlow-Hotspot, /usr/bin/nmcli connection down PixFlow-Hotspot
+```

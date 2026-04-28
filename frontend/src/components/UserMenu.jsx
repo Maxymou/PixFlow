@@ -27,8 +27,13 @@ function parseApiError(error) {
 
 export function UserMenu({ open, onClose }) {
   const [form, setForm] = useState(INITIAL_FORM);
+  const [hotspot, setHotspot] = useState({
+    enabled: true,
+    ethernetConnected: false,
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isHotspotSaving, setIsHotspotSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -62,6 +67,10 @@ export function UserMenu({ open, onClose }) {
           ssid: settings?.wifi?.ssid || '',
           password: settings?.wifi?.password || '',
         });
+        setHotspot({
+          enabled: settings?.wifi?.hotspotEnabled ?? true,
+          ethernetConnected: settings?.wifi?.ethernetConnected ?? false,
+        });
         setStatusMessage('');
       } catch (error) {
         if (!mounted) return;
@@ -85,6 +94,47 @@ export function UserMenu({ open, onClose }) {
 
   const handleCancel = () => {
     onClose();
+  };
+
+  const handleHotspotToggle = async (event) => {
+    const nextEnabled = event.target.checked;
+
+    setStatusMessage('');
+    setErrorMessage('');
+
+    if (!nextEnabled && !hotspot.ethernetConnected) {
+      const confirmDisable = window.confirm(
+        'Aucun câble RJ45 n’est détecté.\n\nSi vous coupez le hotspot Wi-Fi maintenant, vous risquez de perdre la connexion avec PixFlow.\n\nVoulez-vous vraiment désactiver le hotspot ?',
+      );
+
+      if (!confirmDisable) return;
+    }
+
+    setIsHotspotSaving(true);
+
+    try {
+      const updated = await api('/api/settings/hotspot', {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled: nextEnabled }),
+      });
+
+      setHotspot({
+        enabled: updated?.wifi?.hotspotEnabled ?? nextEnabled,
+        ethernetConnected: updated?.wifi?.ethernetConnected ?? hotspot.ethernetConnected,
+      });
+
+      if (nextEnabled) {
+        setStatusMessage('Hotspot Wi-Fi activé.');
+      } else if (hotspot.ethernetConnected) {
+        setStatusMessage('Hotspot Wi-Fi désactivé.');
+      } else {
+        setStatusMessage('Hotspot Wi-Fi désactivé. La connexion peut être perdue.');
+      }
+    } catch (error) {
+      setErrorMessage(parseApiError(error));
+    } finally {
+      setIsHotspotSaving(false);
+    }
   };
 
   const handleSave = async (event) => {
@@ -154,6 +204,24 @@ export function UserMenu({ open, onClose }) {
                 <h3 className="text-sm font-medium text-indigo-300">Hotspot Wi-Fi</h3>
 
                 <div className="mt-4 space-y-4">
+                  <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/50 px-3 py-2.5">
+                    <div>
+                      <p className="text-sm text-slate-200">Hotspot Wi-Fi</p>
+                      <p className={`text-xs ${hotspot.enabled ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {hotspot.enabled ? 'Activé' : 'Désactivé'}
+                      </p>
+                    </div>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={hotspot.enabled}
+                        onChange={handleHotspotToggle}
+                        disabled={isHotspotSaving || isLoading}
+                      />
+                      <span className="slider"></span>
+                    </label>
+                  </div>
+
                   <label className="block text-sm text-slate-200">
                     Nom du réseau Wi-Fi
                     <input
@@ -169,7 +237,7 @@ export function UserMenu({ open, onClose }) {
                   <label className="block text-sm text-slate-200">
                     Mot de passe Wi-Fi
                     <input
-                      type="password"
+                      type="text"
                       value={form.password}
                       onChange={handleChange('password')}
                       placeholder="Minimum 8 caractères"
