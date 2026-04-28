@@ -398,9 +398,14 @@ export function PlayerView() {
 
       {currentItem.type === 'video' && (isVideoLoading || !videoReady) && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/85 px-8 text-center text-slate-100">
-          <div>
+          <div className="flex flex-col items-center">
             <p className="text-2xl font-semibold tracking-wide md:text-3xl">PixFlow</p>
             <p className="mt-3 text-base text-slate-200 md:text-lg">{videoLoadMessage || 'Chargement de la vidéo...'}</p>
+            <div className="mt-4 w-64 max-w-[70vw]">
+              <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+                <div className="animate-video-loading-bar h-full w-1/2 rounded-full bg-cyan-400" />
+              </div>
+            </div>
             {currentItem.file && (
               <p className="mt-2 text-xs text-slate-400 md:text-sm break-all">{currentItem.file}</p>
             )}
