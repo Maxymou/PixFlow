@@ -1,19 +1,29 @@
 #!/usr/bin/env python3
 """PixFlow hotspot host API.
 
-Listens on 127.0.0.1:4876 and proxies commands to /usr/local/bin/pixflow-hotspot.
+Listens on 0.0.0.0:4876 for host + Docker bridge traffic and proxies commands to
+/usr/local/bin/pixflow-hotspot.
 """
 
 from __future__ import annotations
 
 import json
+import ipaddress
 import subprocess
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-HOST = "127.0.0.1"
+HOST = "0.0.0.0"
 PORT = 4876
 HOTSPOT_HELPER = "/usr/local/bin/pixflow-hotspot"
+ALLOWED_CLIENT_NETWORKS = (
+    ipaddress.ip_network("127.0.0.1/32"),
+    ipaddress.ip_network("172.17.0.0/16"),
+    ipaddress.ip_network("172.18.0.0/16"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+)
 
 
 def error_payload(message: str) -> dict:
@@ -22,6 +32,22 @@ def error_payload(message: str) -> dict:
         "enabled": False,
         "error": message,
     }
+
+
+def extract_json_line(output: str) -> str:
+    for line in reversed(output.splitlines()):
+        candidate = line.strip()
+        if candidate.startswith("{") and candidate.endswith("}"):
+            return candidate
+    return ""
+
+
+def is_client_allowed(client_ip: str) -> bool:
+    try:
+        address = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return False
+    return any(address in network for network in ALLOWED_CLIENT_NETWORKS)
 
 
 def run_helper(action: str, *args: str) -> tuple[dict, int]:
@@ -42,15 +68,16 @@ def run_helper(action: str, *args: str) -> tuple[dict, int]:
 
     stdout = (proc.stdout or "").strip()
     stderr = (proc.stderr or "").strip()
+    payload_line = extract_json_line(stdout)
 
-    if not stdout:
+    if not payload_line:
         message = stderr or "helper returned no output"
         return error_payload(message), HTTPStatus.BAD_GATEWAY
 
     try:
-        payload = json.loads(stdout)
+        payload = json.loads(payload_line)
     except json.JSONDecodeError:
-        message = f"invalid helper JSON output: {stdout[:200]}"
+        message = f"invalid helper JSON output: {payload_line[:200]}"
         if stderr:
             message = f"{message} (stderr: {stderr[:200]})"
         return error_payload(message), HTTPStatus.BAD_GATEWAY
@@ -80,6 +107,10 @@ class HotspotHandler(BaseHTTPRequestHandler):
         return json.loads(raw.decode("utf-8"))
 
     def do_GET(self) -> None:  # noqa: N802
+        if not is_client_allowed(self.client_address[0]):
+            self._send_json(error_payload("forbidden"), HTTPStatus.FORBIDDEN)
+            return
+
         if self.path != "/status":
             self._send_json(error_payload("not found"), HTTPStatus.NOT_FOUND)
             return
@@ -87,6 +118,10 @@ class HotspotHandler(BaseHTTPRequestHandler):
         self._send_json(payload, status)
 
     def do_POST(self) -> None:  # noqa: N802
+        if not is_client_allowed(self.client_address[0]):
+            self._send_json(error_payload("forbidden"), HTTPStatus.FORBIDDEN)
+            return
+
         if self.path == "/enable":
             payload, status = run_helper("enable")
         elif self.path == "/disable":
