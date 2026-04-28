@@ -348,10 +348,15 @@ export function PlayerView() {
           }}
           onWaiting={() => {
             console.warn('Video waiting/buffering:', currentUrl);
+            const video = videoRef.current;
+            if (video?.readyState >= 2) {
+              markVideoReady();
+              return;
+            }
             clearVideoBufferingTimeout();
             videoBufferingTimeoutRef.current = setTimeout(() => {
-              const video = videoRef.current;
-              if (!video || video.readyState >= 2) {
+              const currentVideo = videoRef.current;
+              if (!currentVideo || currentVideo.readyState >= 2) {
                 markVideoReady();
                 return;
               }
