@@ -1,0 +1,223 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONNECTION_NAME=${PIXFLOW_HOTSPOT_CONNECTION:-PixFlow-Hotspot}
+WIFI_INTERFACE=${PIXFLOW_WIFI_INTERFACE:-wlan0}
+DEFAULT_SSID=${PIXFLOW_DEFAULT_SSID:-PixFlow}
+DEFAULT_PASSWORD=${PIXFLOW_DEFAULT_PASSWORD:-pixflow1234}
+
+log() {
+  echo "[pixflow-hotspot] $*" >&2
+}
+
+json_escape() {
+  printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'
+}
+
+has_nmcli() {
+  command -v nmcli >/dev/null 2>&1
+}
+
+has_wifi_interface() {
+  ip link show "$WIFI_INTERFACE" >/dev/null 2>&1
+}
+
+connection_exists() {
+  nmcli -t -f NAME connection show | grep -Fxq "$CONNECTION_NAME"
+}
+
+connection_is_active() {
+  nmcli -t -f NAME connection show --active | grep -Fxq "$CONNECTION_NAME"
+}
+
+discover_settings_file() {
+  local candidates=()
+  if [[ -n "${PIXFLOW_SETTINGS_FILE:-}" ]]; then
+    candidates+=("$PIXFLOW_SETTINGS_FILE")
+  fi
+  candidates+=(
+    "/var/lib/pixflow/settings.json"
+    "/opt/pixflow/data/settings.json"
+    "/data/settings.json"
+  )
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+load_wifi_credentials() {
+  local ssid="$DEFAULT_SSID"
+  local password="$DEFAULT_PASSWORD"
+
+  local settings_file
+  if settings_file=$(discover_settings_file); then
+    local parsed
+    if parsed=$(python3 - "$settings_file" <<'PY'
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, 'r', encoding='utf-8') as fh:
+        payload = json.load(fh)
+    wifi = payload.get('wifi') or {}
+    ssid = wifi.get('ssid') or ''
+    password = wifi.get('password') or ''
+    print(f"{ssid}\n{password}")
+except Exception:
+    print("\n")
+PY
+); then
+      local parsed_ssid parsed_password
+      parsed_ssid=$(printf '%s' "$parsed" | sed -n '1p')
+      parsed_password=$(printf '%s' "$parsed" | sed -n '2p')
+
+      if [[ -n "$parsed_ssid" ]]; then
+        ssid="$parsed_ssid"
+      fi
+      if [[ -n "$parsed_password" ]]; then
+        password="$parsed_password"
+      fi
+    fi
+  fi
+
+  if [[ ${#password} -lt 8 ]]; then
+    log "Configured hotspot password too short; using default password."
+    password="$DEFAULT_PASSWORD"
+  fi
+
+  if [[ ${#password} -gt 63 ]]; then
+    log "Configured hotspot password too long; using default password."
+    password="$DEFAULT_PASSWORD"
+  fi
+
+  printf '%s\n%s\n' "$ssid" "$password"
+}
+
+require_prerequisites() {
+  if ! has_nmcli; then
+    echo "{\"available\":false,\"enabled\":false,\"error\":$(json_escape "nmcli is not installed")}"
+    exit 0
+  fi
+
+  if ! has_wifi_interface; then
+    echo "{\"available\":false,\"enabled\":false,\"error\":$(json_escape "Wi-Fi interface $WIFI_INTERFACE not found")}"
+    exit 0
+  fi
+}
+
+ensure_connection() {
+  local ssid="$1"
+  local password="$2"
+
+  if ! connection_exists; then
+    log "Creating NetworkManager hotspot connection: $CONNECTION_NAME"
+    nmcli connection add type wifi ifname "$WIFI_INTERFACE" con-name "$CONNECTION_NAME" autoconnect yes ssid "$ssid"
+  fi
+
+  nmcli connection modify "$CONNECTION_NAME" \
+    connection.interface-name "$WIFI_INTERFACE" \
+    connection.autoconnect yes \
+    802-11-wireless.mode ap \
+    802-11-wireless.band bg \
+    802-11-wireless.ssid "$ssid" \
+    ipv4.method shared \
+    ipv6.method ignore \
+    wifi-sec.key-mgmt wpa-psk \
+    wifi-sec.psk "$password"
+}
+
+cmd_status() {
+  if ! has_nmcli; then
+    echo "{\"available\":false,\"enabled\":false,\"error\":$(json_escape "nmcli is not installed")}"
+    return 0
+  fi
+
+  if ! has_wifi_interface; then
+    echo "{\"available\":false,\"enabled\":false,\"error\":$(json_escape "Wi-Fi interface $WIFI_INTERFACE not found")}"
+    return 0
+  fi
+
+  local enabled=false
+  if connection_is_active; then
+    enabled=true
+  fi
+
+  echo "{\"available\":true,\"enabled\":${enabled},\"connection\":$(json_escape "$CONNECTION_NAME"),\"wifiInterface\":$(json_escape "$WIFI_INTERFACE")}"
+}
+
+cmd_ensure() {
+  require_prerequisites
+  local creds ssid password
+  creds=$(load_wifi_credentials)
+  ssid=$(printf '%s' "$creds" | sed -n '1p')
+  password=$(printf '%s' "$creds" | sed -n '2p')
+  ensure_connection "$ssid" "$password"
+  nmcli connection up "$CONNECTION_NAME"
+  cmd_status
+}
+
+cmd_enable() {
+  cmd_ensure
+}
+
+cmd_disable() {
+  require_prerequisites
+  if connection_is_active; then
+    nmcli connection down "$CONNECTION_NAME"
+  fi
+  cmd_status
+}
+
+cmd_configure() {
+  require_prerequisites
+  local ssid="${1:-}"
+  local password="${2:-}"
+
+  if [[ -z "$ssid" ]]; then
+    log "SSID is required."
+    exit 1
+  fi
+
+  if [[ ${#ssid} -gt 32 ]]; then
+    log "SSID must be 32 characters or fewer."
+    exit 1
+  fi
+
+  if [[ ${#password} -lt 8 || ${#password} -gt 63 ]]; then
+    log "Password must be between 8 and 63 characters."
+    exit 1
+  fi
+
+  ensure_connection "$ssid" "$password"
+
+  if connection_is_active; then
+    nmcli connection down "$CONNECTION_NAME" || true
+    nmcli connection up "$CONNECTION_NAME"
+  fi
+
+  cmd_status
+}
+
+main() {
+  local action="${1:-status}"
+  shift || true
+
+  case "$action" in
+    status) cmd_status ;;
+    ensure) cmd_ensure ;;
+    enable) cmd_enable ;;
+    disable) cmd_disable ;;
+    configure) cmd_configure "$@" ;;
+    *)
+      echo "Usage: $0 {status|ensure|enable|disable|configure <ssid> <password>}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

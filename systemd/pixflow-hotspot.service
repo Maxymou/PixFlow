@@ -1,0 +1,12 @@
+[Unit]
+Description=PixFlow Hotspot ensure service
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pixflow-hotspot ensure
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
