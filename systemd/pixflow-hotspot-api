@@ -13,6 +13,9 @@ import subprocess
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# Bind on all interfaces so Docker bridge clients can reach the API via
+# host.docker.internal, but keep access restricted by ALLOWED_CLIENT_NETWORKS;
+# do not expose this service publicly.
 HOST = "0.0.0.0"
 PORT = 4876
 HOTSPOT_HELPER = "/usr/local/bin/pixflow-hotspot"
