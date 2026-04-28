@@ -40,6 +40,8 @@ const ALLOWED_UPLOAD_TYPES = new Set([
 ]);
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.avi', '.mov', '.mkv', '.webm']);
 const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', ...VIDEO_EXTENSIONS]);
+const hotspotConnectionName = process.env.HOTSPOT_CONNECTION_NAME || 'PixFlow-Hotspot';
+let hotspotEnabledRuntime = true;
 
 app.use(cors());
 app.use(express.json());
@@ -289,6 +291,113 @@ const ensureMediaCapacity = async () => {
   }
 };
 
+const runCommand = (command, args = []) => new Promise((resolve, reject) => {
+  const child = spawn(command, args);
+  let stdout = '';
+  let stderr = '';
+
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk.toString();
+  });
+
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+
+  child.on('error', reject);
+  child.on('close', (code) => {
+    if (code === 0) {
+      resolve({ stdout, stderr });
+      return;
+    }
+    reject(new Error(`${command} ${args.join(' ')} failed with code ${code}: ${stderr || stdout}`));
+  });
+});
+
+const hasCommand = async (command) => {
+  try {
+    await runCommand('which', [command]);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const detectHotspotControlBackend = async () => {
+  if (await hasCommand('nmcli')) return 'nmcli';
+  if (await hasCommand('systemctl')) return 'systemctl';
+  return null;
+};
+
+async function isEthernetConnected() {
+  try {
+    const interfaces = await fs.readdir('/sys/class/net');
+    const ethernetCandidates = interfaces.filter((iface) => iface === 'eth0' || iface.startsWith('enx') || iface.startsWith('en'));
+
+    for (const iface of ethernetCandidates) {
+      const carrierPath = `/sys/class/net/${iface}/carrier`;
+      try {
+        const carrier = (await fs.readFile(carrierPath, 'utf8')).trim();
+        if (carrier === '1') return true;
+      } catch {
+        // Ignore missing carrier files for virtual/unsupported interfaces.
+      }
+    }
+  } catch (error) {
+    console.warn('[PixFlow] Failed to detect ethernet state:', error.message);
+  }
+
+  return false;
+}
+
+async function enableHotspot() {
+  const backend = await detectHotspotControlBackend();
+  if (!backend) throw new Error('No hotspot control backend available');
+
+  if (backend === 'nmcli') {
+    await runCommand('nmcli', ['connection', 'up', hotspotConnectionName]);
+  } else {
+    try {
+      await runCommand('systemctl', ['start', 'hostapd']);
+      await runCommand('systemctl', ['start', 'dnsmasq']);
+    } catch {
+      await runCommand('sudo', ['systemctl', 'start', 'hostapd']);
+      await runCommand('sudo', ['systemctl', 'start', 'dnsmasq']);
+    }
+  }
+}
+
+async function disableHotspot() {
+  const backend = await detectHotspotControlBackend();
+  if (!backend) throw new Error('No hotspot control backend available');
+
+  if (backend === 'nmcli') {
+    await runCommand('nmcli', ['connection', 'down', hotspotConnectionName]);
+  } else {
+    try {
+      await runCommand('systemctl', ['stop', 'hostapd']);
+      await runCommand('systemctl', ['stop', 'dnsmasq']);
+    } catch {
+      await runCommand('sudo', ['systemctl', 'stop', 'hostapd']);
+      await runCommand('sudo', ['systemctl', 'stop', 'dnsmasq']);
+    }
+  }
+}
+
+const buildSettingsResponse = async () => {
+  const settings = await readJson(settingsFile);
+  const ethernetConnected = await isEthernetConnected();
+  const wifi = settings.wifi || {};
+  return {
+    ...settings,
+    wifi: {
+      ...wifi,
+      hotspotEnabled: hotspotEnabledRuntime,
+      ethernetConnected,
+    },
+  };
+};
+
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 app.get('/projects', async (_req, res, next) => {
@@ -461,7 +570,7 @@ app.get('/playlist', async (_req, res, next) => {
 
 app.get('/settings', async (_req, res, next) => {
   try {
-    const settings = await readJson(settingsFile);
+    const settings = await buildSettingsResponse();
     res.json(settings);
   } catch (error) { next(error); }
 });
@@ -507,8 +616,29 @@ app.patch('/settings/wifi', async (req, res, next) => {
     // For now, PixFlow only stores the desired hotspot configuration in /data/settings.json.
     await writeJson(settingsFile, settings);
 
-    res.json(settings);
+    res.json(await buildSettingsResponse());
   } catch (error) { next(error); }
+});
+
+app.patch('/settings/hotspot', async (req, res, next) => {
+  try {
+    const { enabled } = req.body || {};
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: 'enabled must be a boolean' });
+    }
+
+    if (enabled) {
+      await enableHotspot();
+    } else {
+      await disableHotspot();
+    }
+
+    hotspotEnabledRuntime = enabled;
+    res.json(await buildSettingsResponse());
+  } catch (error) {
+    console.error('[PixFlow] Failed to toggle hotspot:', error);
+    res.status(500).json({ error: 'Impossible de modifier l’état du hotspot Wi-Fi.' });
+  }
 });
 
 
@@ -531,6 +661,16 @@ app.use((error, _req, res, _next) => {
 });
 
 ensureFiles().then(() => {
+  console.log('[PixFlow] Ensuring hotspot is enabled on startup');
+  enableHotspot()
+    .then(() => {
+      hotspotEnabledRuntime = true;
+      console.log('[PixFlow] Hotspot enabled on startup');
+    })
+    .catch((error) => {
+      console.warn('[PixFlow] Unable to enable hotspot on startup:', error.message);
+    });
+
   app.listen(port, '0.0.0.0', () => {
     console.log(`Backend listening on ${port}`);
   });
