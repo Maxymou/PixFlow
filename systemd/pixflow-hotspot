@@ -127,7 +127,7 @@ ensure_connection() {
 
   if ! connection_exists; then
     log "Creating NetworkManager hotspot connection: $CONNECTION_NAME"
-    nmcli connection add type wifi ifname "$WIFI_INTERFACE" con-name "$CONNECTION_NAME" autoconnect yes ssid "$ssid" >/dev/stderr
+    nmcli connection add type wifi ifname "$WIFI_INTERFACE" con-name "$CONNECTION_NAME" autoconnect yes ssid "$ssid" >&2
   fi
 
   nmcli connection modify "$CONNECTION_NAME" \
@@ -139,7 +139,7 @@ ensure_connection() {
     ipv4.method shared \
     ipv6.method ignore \
     wifi-sec.key-mgmt wpa-psk \
-    wifi-sec.psk "$password" >/dev/stderr
+    wifi-sec.psk "$password" >&2
 }
 
 cmd_status() {
@@ -173,8 +173,8 @@ cmd_ensure() {
   ssid=$(printf '%s' "$creds" | sed -n '1p')
   password=$(printf '%s' "$creds" | sed -n '2p')
   ensure_connection "$ssid" "$password"
-  nmcli connection modify "$CONNECTION_NAME" connection.autoconnect yes >/dev/stderr
-  nmcli connection up "$CONNECTION_NAME" >/dev/stderr
+  nmcli connection modify "$CONNECTION_NAME" connection.autoconnect yes >&2
+  nmcli connection up "$CONNECTION_NAME" >&2
   cmd_status
 }
 
@@ -184,8 +184,8 @@ cmd_enable() {
 
 cmd_disable() {
   require_prerequisites
-  nmcli connection modify "$CONNECTION_NAME" connection.autoconnect no >/dev/stderr 2>&1 || true
-  nmcli connection down "$CONNECTION_NAME" >/dev/stderr 2>&1 || true
+  nmcli connection modify "$CONNECTION_NAME" connection.autoconnect no >&2 2>&1 || true
+  nmcli connection down "$CONNECTION_NAME" >&2 2>&1 || true
   sleep 1
   cmd_status
 }
@@ -213,8 +213,8 @@ cmd_configure() {
   ensure_connection "$ssid" "$password"
 
   if connection_is_active; then
-    nmcli connection down "$CONNECTION_NAME" >/dev/stderr 2>&1 || true
-    nmcli connection up "$CONNECTION_NAME" >/dev/stderr
+    nmcli connection down "$CONNECTION_NAME" >&2 2>&1 || true
+    nmcli connection up "$CONNECTION_NAME" >&2
   fi
 
   cmd_status
