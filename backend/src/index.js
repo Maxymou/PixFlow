@@ -5,6 +5,7 @@ import { nanoid } from 'nanoid';
 import fs from 'fs/promises';
 import path from 'path';
 import { spawn } from 'child_process';
+import { constants as fsConstants } from 'fs';
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -41,6 +42,7 @@ const ALLOWED_UPLOAD_TYPES = new Set([
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.avi', '.mov', '.mkv', '.webm']);
 const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', ...VIDEO_EXTENSIONS]);
 const hotspotConnectionName = process.env.HOTSPOT_CONNECTION_NAME || 'PixFlow-Hotspot';
+const hotspotHelperPath = process.env.HOTSPOT_HELPER_PATH || '/usr/local/bin/pixflow-hotspot';
 let hotspotEnabledRuntime = true;
 
 app.use(cors());
@@ -324,9 +326,29 @@ const hasCommand = async (command) => {
 };
 
 const detectHotspotControlBackend = async () => {
+  try {
+    await fs.access(hotspotHelperPath, fsConstants.X_OK);
+    return 'helper';
+  } catch {
+    // helper not available
+  }
   if (await hasCommand('nmcli')) return 'nmcli';
   if (await hasCommand('systemctl')) return 'systemctl';
   return null;
+};
+
+const runHotspotHelper = async (action, args = []) => runCommand(hotspotHelperPath, [action, ...args]);
+
+const parseHotspotHelperStatus = (stdout) => {
+  try {
+    const parsed = JSON.parse(stdout);
+    return {
+      available: Boolean(parsed.available),
+      enabled: Boolean(parsed.enabled),
+    };
+  } catch {
+    return null;
+  }
 };
 
 async function isEthernetConnected() {
@@ -354,7 +376,9 @@ async function enableHotspot() {
   const backend = await detectHotspotControlBackend();
   if (!backend) throw new Error('No hotspot control backend available');
 
-  if (backend === 'nmcli') {
+  if (backend === 'helper') {
+    await runHotspotHelper('enable');
+  } else if (backend === 'nmcli') {
     await runCommand('nmcli', ['connection', 'up', hotspotConnectionName]);
   } else {
     try {
@@ -371,7 +395,9 @@ async function disableHotspot() {
   const backend = await detectHotspotControlBackend();
   if (!backend) throw new Error('No hotspot control backend available');
 
-  if (backend === 'nmcli') {
+  if (backend === 'helper') {
+    await runHotspotHelper('disable');
+  } else if (backend === 'nmcli') {
     await runCommand('nmcli', ['connection', 'down', hotspotConnectionName]);
   } else {
     try {
@@ -388,11 +414,27 @@ const buildSettingsResponse = async () => {
   const settings = await readJson(settingsFile);
   const ethernetConnected = await isEthernetConnected();
   const wifi = settings.wifi || {};
+  let hotspotEnabled = hotspotEnabledRuntime;
+  const backend = await detectHotspotControlBackend();
+
+  if (backend === 'helper') {
+    try {
+      const { stdout } = await runHotspotHelper('status');
+      const status = parseHotspotHelperStatus(stdout);
+      if (status?.available) {
+        hotspotEnabled = status.enabled;
+        hotspotEnabledRuntime = status.enabled;
+      }
+    } catch (error) {
+      console.warn('[PixFlow] Unable to read hotspot status from helper:', error.message);
+    }
+  }
+
   return {
     ...settings,
     wifi: {
       ...wifi,
-      hotspotEnabled: hotspotEnabledRuntime,
+      hotspotEnabled,
       ethernetConnected,
     },
   };
@@ -612,9 +654,16 @@ app.patch('/settings/wifi', async (req, res, next) => {
       password,
     };
 
-    // TODO: Apply Wi-Fi hotspot settings to the Raspberry Pi host system through a controlled host-side service.
-    // For now, PixFlow only stores the desired hotspot configuration in /data/settings.json.
     await writeJson(settingsFile, settings);
+
+    const backend = await detectHotspotControlBackend();
+    if (backend === 'helper') {
+      try {
+        await runHotspotHelper('configure', [trimmedSsid, password]);
+      } catch (error) {
+        console.warn('[PixFlow] Failed to apply hotspot configuration via helper:', error.message);
+      }
+    }
 
     res.json(await buildSettingsResponse());
   } catch (error) { next(error); }
@@ -662,9 +711,23 @@ app.use((error, _req, res, _next) => {
 
 ensureFiles().then(() => {
   console.log('[PixFlow] Ensuring hotspot is enabled on startup');
-  enableHotspot()
-    .then(() => {
-      hotspotEnabledRuntime = true;
+  detectHotspotControlBackend()
+    .then((backend) => {
+      if (!backend) {
+        throw new Error('No hotspot control backend available');
+      }
+      if (backend === 'helper') {
+        return runHotspotHelper('ensure');
+      }
+      return enableHotspot();
+    })
+    .then(async () => {
+      try {
+        const settings = await buildSettingsResponse();
+        hotspotEnabledRuntime = Boolean(settings?.wifi?.hotspotEnabled);
+      } catch {
+        hotspotEnabledRuntime = true;
+      }
       console.log('[PixFlow] Hotspot enabled on startup');
     })
     .catch((error) => {

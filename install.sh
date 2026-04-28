@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+INSTALL_USER="${SUDO_USER:-$USER}"
 
 echo "=============================="
 echo "     PixFlow Installer"
@@ -42,6 +43,21 @@ if [ "$MODE" = "prod" ]; then
   read -r -p "Install Raspberry kiosk display service? [Y/n] " INSTALL_KIOSK
   INSTALL_KIOSK=${INSTALL_KIOSK:-Y}
 
+  sudo apt-get update
+  sudo apt-get install -y network-manager
+  sudo install -m 755 "$ROOT_DIR/systemd/pixflow-hotspot" /usr/local/bin/pixflow-hotspot
+
+  sudo tee /etc/sudoers.d/pixflow-hotspot >/dev/null <<EOF
+${INSTALL_USER} ALL=(root) NOPASSWD: /usr/local/bin/pixflow-hotspot *
+EOF
+  sudo chmod 440 /etc/sudoers.d/pixflow-hotspot
+  sudo visudo -cf /etc/sudoers.d/pixflow-hotspot
+
+  sudo cp "$ROOT_DIR/systemd/pixflow-hotspot.service" /etc/systemd/system/pixflow-hotspot.service
+  sudo systemctl daemon-reload
+  sudo systemctl enable pixflow-hotspot.service
+  sudo systemctl restart pixflow-hotspot.service
+
   docker compose --profile prod up -d --build
 
   case "$INSTALL_KIOSK" in
@@ -52,6 +68,8 @@ if [ "$MODE" = "prod" ]; then
       echo "Skipping Raspberry kiosk setup."
       ;;
   esac
+
+  sudo /usr/local/bin/pixflow-hotspot ensure
 else
   docker compose up -d --build
 fi

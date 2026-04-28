@@ -12,6 +12,7 @@ services:
       - VIDEO_MAX_FPS=30
     volumes:
       - pixflow_data:/data
+      - /usr/local/bin/pixflow-hotspot:/usr/local/bin/pixflow-hotspot:ro
     networks: [pixflow]
 
   frontend:
