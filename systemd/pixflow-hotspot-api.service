@@ -1,0 +1,14 @@
+[Unit]
+Description=PixFlow Hotspot Host API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/pixflow-hotspot-api
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

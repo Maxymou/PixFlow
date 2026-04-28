@@ -10,9 +10,11 @@ services:
       - MAX_UPLOAD_SIZE_BYTES=524288000
       - VIDEO_MAX_WIDTH=1920
       - VIDEO_MAX_FPS=30
+      - HOTSPOT_HOST_API_URL=http://host.docker.internal:4876
     volumes:
       - pixflow_data:/data
-      - /usr/local/bin/pixflow-hotspot:/usr/local/bin/pixflow-hotspot:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks: [pixflow]
 
   frontend:
