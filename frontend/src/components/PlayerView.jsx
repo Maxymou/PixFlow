@@ -337,6 +337,13 @@ export function PlayerView() {
     }
   }, []);
 
+  const clearPreviewInterval = useCallback(() => {
+    if (previewIntervalRef.current) {
+      clearInterval(previewIntervalRef.current);
+      previewIntervalRef.current = null;
+    }
+  }, []);
+
   const applyKioskCommand = useCallback((command) => {
     console.log('[PixFlow kiosk] Applying command:', command);
     if (command === 'pause') {
@@ -410,13 +417,6 @@ export function PlayerView() {
       isSendingPreviewRef.current = false;
     }
   }, [currentItem]);
-
-  const clearPreviewInterval = useCallback(() => {
-    if (previewIntervalRef.current) {
-      clearInterval(previewIntervalRef.current);
-      previewIntervalRef.current = null;
-    }
-  }, []);
 
   useEffect(() => {
     sendHeartbeat({ status: 'idle', message: 'Kiosk loaded' });
