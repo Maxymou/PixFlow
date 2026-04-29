@@ -80,7 +80,7 @@ export function Dashboard({ projects, onRefresh }) {
     };
 
     fetchKioskStatusAndPreview();
-    const id = setInterval(fetchKioskStatusAndPreview, 5000);
+    const id = setInterval(fetchKioskStatusAndPreview, 1000);
     return () => {
       active = false;
       clearInterval(id);

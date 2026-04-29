@@ -6,8 +6,10 @@ const PLAYLIST_RETRY_MS = 10_000;
 const VIDEO_START_TIMEOUT_MS = 60_000;
 const VIDEO_MAX_RECOVERIES = 2;
 const KIOSK_HEARTBEAT_INTERVAL_MS = 5_000;
-const KIOSK_PREVIEW_INTERVAL_MS = 5_000;
+const KIOSK_PREVIEW_INTERVAL_MS = 1_000;
 const KIOSK_IMAGE_REFRESH_INTERVAL_MS = 30_000;
+const KIOSK_PREVIEW_WIDTH = 360;
+const KIOSK_PREVIEW_QUALITY = 0.55;
 
 const toMediaUrl = (item) => {
   if (!item?.file) return null;
@@ -31,6 +33,7 @@ export function PlayerView() {
   const videoBufferingTimeoutRef = useRef(null);
   const videoLoadingOverlayTimeoutRef = useRef(null);
   const previewIntervalRef = useRef(null);
+  const isSendingPreviewRef = useRef(false);
   const heartbeatPayloadRef = useRef({
     status: 'idle',
     projectId: null,
@@ -331,14 +334,16 @@ export function PlayerView() {
   }, []);
 
   const sendPreview = useCallback(async (partial = {}) => {
+    if (isSendingPreviewRef.current) return;
     const mediaElement = partial.mediaElement || videoRef.current;
     if (!mediaElement) return;
+    isSendingPreviewRef.current = true;
     try {
       const sourceWidth = mediaElement.videoWidth || mediaElement.naturalWidth || mediaElement.clientWidth || 480;
       const sourceHeight = mediaElement.videoHeight || mediaElement.naturalHeight || mediaElement.clientHeight || 270;
       if (!sourceWidth || !sourceHeight) return;
 
-      const width = Math.min(480, sourceWidth);
+      const width = Math.min(KIOSK_PREVIEW_WIDTH, sourceWidth);
       const ratio = sourceHeight / sourceWidth;
       const height = Math.max(1, Math.round(width * ratio));
       const canvas = document.createElement('canvas');
@@ -348,7 +353,7 @@ export function PlayerView() {
       if (!ctx) return;
       ctx.drawImage(mediaElement, 0, 0, width, height);
 
-      const imageDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      const imageDataUrl = canvas.toDataURL('image/jpeg', KIOSK_PREVIEW_QUALITY);
       const payload = {
         imageDataUrl,
         mediaId: partial.mediaId ?? currentItem?.id ?? null,
@@ -362,6 +367,8 @@ export function PlayerView() {
       });
     } catch {
       // Best effort only: ignore canvas/CORS/network errors.
+    } finally {
+      isSendingPreviewRef.current = false;
     }
   }, [currentItem]);
 
