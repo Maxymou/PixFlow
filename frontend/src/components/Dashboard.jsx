@@ -52,18 +52,26 @@ export function Dashboard({ projects, onRefresh }) {
   return (
     <div className="animate-slide-up space-y-6">
       {/* ── Stats ──────────────────────────────────────────── */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="stat-card">
-          <span className="text-2xl font-bold text-slate-100">{projects.length}</span>
-          <span className="text-xs text-slate-500">Projects</span>
+      <div className="card border-slate-800/90">
+        <div className="mb-4 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+            Projects overview
+          </p>
         </div>
-        <div className="stat-card">
-          <span className="text-2xl font-bold text-emerald-400">{activeCount}</span>
-          <span className="text-xs text-slate-500">Active</span>
-        </div>
-        <div className="stat-card">
-          <span className="text-2xl font-bold text-slate-400">{inactiveCount}</span>
-          <span className="text-xs text-slate-500">Inactive</span>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
+            <span className="block text-2xl font-bold text-slate-100">{projects.length}</span>
+            <span className="text-xs text-slate-500">Projects</span>
+          </div>
+          <div className="rounded-lg border border-emerald-500/20 bg-emerald-950/20 px-3 py-2">
+            <span className="block text-2xl font-bold text-emerald-400">{activeCount}</span>
+            <span className="text-xs text-emerald-300/70">Active</span>
+          </div>
+          <div className="rounded-lg border border-slate-700 bg-slate-950/30 px-3 py-2">
+            <span className="block text-2xl font-bold text-slate-300">{inactiveCount}</span>
+            <span className="text-xs text-slate-500">Inactive</span>
+          </div>
         </div>
       </div>
 
