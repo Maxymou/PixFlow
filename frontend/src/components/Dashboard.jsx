@@ -17,6 +17,7 @@ export function Dashboard({ projects, onRefresh }) {
     available: false,
     message: 'No preview available',
   });
+  const [kioskCommandLoading, setKioskCommandLoading] = useState(false);
 
   const activeCount = projects.filter((p) => p.active).length;
   const inactiveCount = projects.length - activeCount;
@@ -24,6 +25,8 @@ export function Dashboard({ projects, onRefresh }) {
     const status = kioskStatus.status || 'offline';
     const labels = {
       playing: 'Playing',
+      paused: 'Paused',
+      stopped: 'Stopped',
       loading: 'Loading',
       idle: 'Idle',
       error: 'Error',
@@ -56,6 +59,9 @@ export function Dashboard({ projects, onRefresh }) {
     return `${Math.floor(previewAgeSeconds / 60)}m ago`;
   }, [previewAgeSeconds]);
   const previewIsStale = (previewAgeSeconds ?? 0) > 30;
+  const kioskIsOffline = kioskStatus.status === 'offline' || kioskStatus.online === false;
+  const pausePlayCommand = ['paused', 'stopped'].includes(kioskStatus.status) ? 'play' : 'pause';
+  const pausePlayLabel = pausePlayCommand === 'play' ? 'Play' : 'Pause';
 
   useEffect(() => {
     let active = true;
@@ -125,6 +131,18 @@ export function Dashboard({ projects, onRefresh }) {
     onRefresh();
   };
 
+  const sendKioskCommand = async (command) => {
+    if (kioskCommandLoading || kioskIsOffline) return;
+    setKioskCommandLoading(true);
+    try {
+      await api('/api/kiosk/command', { method: 'POST', body: JSON.stringify({ command }) });
+    } catch {
+      // Keep the dashboard non-blocking on control call failures.
+    } finally {
+      setKioskCommandLoading(false);
+    }
+  };
+
   return (
     <div className="animate-slide-up space-y-6">
       {/* ── Stats ──────────────────────────────────────────── */}
@@ -147,6 +165,30 @@ export function Dashboard({ projects, onRefresh }) {
           <div className="rounded-lg border border-slate-700 bg-slate-950/30 px-3 py-2">
             <span className="block text-2xl font-bold text-slate-300">{inactiveCount}</span>
             <span className="text-xs text-slate-500">Inactive</span>
+          </div>
+        </div>
+        <div className="mt-4 border-t border-slate-800/80 pt-4">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Kiosk controls</p>
+            {kioskIsOffline && <span className="text-xs text-rose-300">Kiosk offline</span>}
+          </div>
+          <div className="mb-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={kioskIsOffline || kioskCommandLoading}
+              onClick={() => sendKioskCommand(pausePlayCommand)}
+              className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-sm font-medium text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {kioskCommandLoading ? '…' : pausePlayLabel}
+            </button>
+            <button
+              type="button"
+              disabled={kioskIsOffline || kioskCommandLoading}
+              onClick={() => sendKioskCommand('stop')}
+              className="rounded-lg border border-rose-500/50 bg-rose-500/10 px-3 py-2 text-sm font-medium text-rose-200 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {kioskCommandLoading ? '…' : 'Arrêter'}
+            </button>
           </div>
         </div>
         <div className="mt-4 border-t border-slate-800/80 pt-4">
