@@ -6,6 +6,8 @@ const PLAYLIST_RETRY_MS = 10_000;
 const VIDEO_START_TIMEOUT_MS = 60_000;
 const VIDEO_MAX_RECOVERIES = 2;
 const KIOSK_HEARTBEAT_INTERVAL_MS = 5_000;
+const KIOSK_PREVIEW_INTERVAL_MS = 5_000;
+const KIOSK_IMAGE_REFRESH_INTERVAL_MS = 30_000;
 
 const toMediaUrl = (item) => {
   if (!item?.file) return null;
@@ -28,6 +30,7 @@ export function PlayerView() {
   const videoRecoveryAttemptsRef = useRef(0);
   const videoBufferingTimeoutRef = useRef(null);
   const videoLoadingOverlayTimeoutRef = useRef(null);
+  const previewIntervalRef = useRef(null);
   const heartbeatPayloadRef = useRef({
     status: 'idle',
     projectId: null,
@@ -327,6 +330,48 @@ export function PlayerView() {
     }
   }, []);
 
+  const sendPreview = useCallback(async (partial = {}) => {
+    const mediaElement = partial.mediaElement || videoRef.current;
+    if (!mediaElement) return;
+    try {
+      const sourceWidth = mediaElement.videoWidth || mediaElement.naturalWidth || mediaElement.clientWidth || 480;
+      const sourceHeight = mediaElement.videoHeight || mediaElement.naturalHeight || mediaElement.clientHeight || 270;
+      if (!sourceWidth || !sourceHeight) return;
+
+      const width = Math.min(480, sourceWidth);
+      const ratio = sourceHeight / sourceWidth;
+      const height = Math.max(1, Math.round(width * ratio));
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(mediaElement, 0, 0, width, height);
+
+      const imageDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      const payload = {
+        imageDataUrl,
+        mediaId: partial.mediaId ?? currentItem?.id ?? null,
+        mediaName: partial.mediaName ?? currentItem?.originalName ?? currentItem?.file ?? null,
+        mediaType: partial.mediaType ?? currentItem?.type ?? null,
+        status: partial.status ?? heartbeatPayloadRef.current.status ?? 'idle',
+      };
+      await api('/api/kiosk/preview', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      // Best effort only: ignore canvas/CORS/network errors.
+    }
+  }, [currentItem]);
+
+  const clearPreviewInterval = useCallback(() => {
+    if (previewIntervalRef.current) {
+      clearInterval(previewIntervalRef.current);
+      previewIntervalRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     sendHeartbeat({ status: 'idle', message: 'Kiosk loaded' });
     const id = setInterval(() => {
@@ -335,8 +380,11 @@ export function PlayerView() {
     return () => clearInterval(id);
   }, [sendHeartbeat]);
 
+  useEffect(() => () => clearPreviewInterval(), [clearPreviewInterval]);
+
   useEffect(() => {
     if (!currentItem || !currentUrl) {
+      clearPreviewInterval();
       if (status === 'offline') {
         sendHeartbeat({ status: 'idle', message: 'Backend offline' });
       } else {
@@ -361,7 +409,10 @@ export function PlayerView() {
       status: currentItem.type === 'video' ? 'loading' : 'playing',
       message: currentItem.type === 'video' ? 'Loading media' : null,
     });
-  }, [currentItem, currentUrl, sendHeartbeat, status]);
+    return () => {
+      clearPreviewInterval();
+    };
+  }, [clearPreviewInterval, currentItem, currentUrl, sendHeartbeat, status]);
 
   if (!currentItem || !currentUrl) {
     if (playlist.length > 0 && activePlaylist.length > 0) {
@@ -443,6 +494,11 @@ export function PlayerView() {
             console.log('Video playing:', currentUrl);
             markVideoReady();
             sendHeartbeat({ status: 'playing', message: null });
+            sendPreview({ mediaElement: videoRef.current, status: 'playing' });
+            clearPreviewInterval();
+            previewIntervalRef.current = setInterval(() => {
+              sendPreview({ mediaElement: videoRef.current, status: 'playing' });
+            }, KIOSK_PREVIEW_INTERVAL_MS);
           }}
           onWaiting={() => {
             console.warn('Video waiting/buffering:', currentUrl);
@@ -477,6 +533,7 @@ export function PlayerView() {
             setVideoReady(false);
             setVideoLoadMessage('Chargement de la vidéo...');
             sendHeartbeat({ status: 'idle', message: 'Media ended' });
+            clearPreviewInterval();
             next(activePlaylist.length);
           }}
           onError={(event) => {
@@ -490,6 +547,7 @@ export function PlayerView() {
             setIsVideoLoading(true);
             setVideoLoadMessage('Erreur vidéo, passage au média suivant...');
             sendHeartbeat({ status: 'error', message: 'Failed to load media' });
+            clearPreviewInterval();
             markCurrentFailed();
           }}
         />
@@ -501,6 +559,13 @@ export function PlayerView() {
           className="max-h-full max-w-full object-contain"
           draggable={false}
           onError={markCurrentFailed}
+          onLoad={(event) => {
+            sendPreview({ mediaElement: event.currentTarget, status: 'playing' });
+            clearPreviewInterval();
+            previewIntervalRef.current = setInterval(() => {
+              sendPreview({ mediaElement: event.currentTarget, status: 'playing' });
+            }, KIOSK_IMAGE_REFRESH_INTERVAL_MS);
+          }}
         />
       )}
 
