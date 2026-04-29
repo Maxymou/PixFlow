@@ -45,6 +45,9 @@ const hotspotConnectionName = process.env.HOTSPOT_CONNECTION_NAME || 'PixFlow-Ho
 const hotspotHelperPath = process.env.HOTSPOT_HELPER_PATH || '/usr/local/bin/pixflow-hotspot';
 const hotspotHostApiUrl = process.env.HOTSPOT_HOST_API_URL || '';
 let hotspotEnabledRuntime = true;
+let latestKioskStatus = null;
+const KIOSK_HEARTBEAT_TIMEOUT_MS = 15_000;
+const ALLOWED_KIOSK_STATES = new Set(['playing', 'loading', 'idle', 'error', 'no_active_project']);
 
 app.use(cors());
 app.use(express.json());
@@ -198,6 +201,41 @@ const normalizeMedia = (item) => ({
   progress: item.progress ?? 100,
 });
 
+const cleanKioskValue = (value) => (value === undefined ? null : value);
+const normalizeKioskStatus = (value) => {
+  if (typeof value !== 'string') return 'idle';
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return 'idle';
+  return ALLOWED_KIOSK_STATES.has(normalized) ? normalized : 'idle';
+};
+
+const buildKioskStatusResponse = () => {
+  if (!latestKioskStatus) {
+    return {
+      online: false,
+      status: 'offline',
+      message: 'No kiosk heartbeat received',
+      lastSeenAt: null,
+    };
+  }
+
+  const lastSeenTime = new Date(latestKioskStatus.lastSeenAt).getTime();
+  const isTimedOut = !Number.isFinite(lastSeenTime) || (Date.now() - lastSeenTime) > KIOSK_HEARTBEAT_TIMEOUT_MS;
+  if (isTimedOut) {
+    return {
+      ...latestKioskStatus,
+      online: false,
+      status: 'offline',
+      message: 'Kiosk heartbeat timed out',
+    };
+  }
+
+  return {
+    ...latestKioskStatus,
+    online: true,
+  };
+};
+
 const updateMediaItem = async (mediaId, updater) => {
   const media = await readJson(mediaFile);
   const item = media.find((entry) => entry.id === mediaId);
@@ -268,6 +306,7 @@ const processVideoInBackground = async (mediaId, inputPath, outputPath, finalNam
 
 const buildPlaylist = async () => {
   const projects = await readJson(projectsFile);
+  const projectsById = new Map(projects.map((project) => [project.id, project]));
   const media = await readJson(mediaFile);
   const activeProjectIds = new Set(projects.filter((p) => p.active).map((p) => p.id));
   const playlist = media
@@ -276,6 +315,10 @@ const buildPlaylist = async () => {
       return m.active && status === 'ready' && m.file && activeProjectIds.has(m.projectId);
     })
     .map((m) => ({
+      id: m.id,
+      projectId: m.projectId,
+      projectName: projectsById.get(m.projectId)?.name || null,
+      originalName: m.originalName || null,
       type: m.type,
       file: `/media/${m.file}`,
       ...(m.type === 'image' ? { duration: m.duration || 5 } : {}),
@@ -740,6 +783,27 @@ app.get('/playlist', async (_req, res, next) => {
     const playlist = await buildPlaylist();
     res.json(playlist);
   } catch (error) { next(error); }
+});
+
+app.post('/kiosk/heartbeat', (req, res) => {
+  const nowIso = new Date().toISOString();
+  latestKioskStatus = {
+    online: true,
+    status: normalizeKioskStatus(req.body?.status),
+    projectId: cleanKioskValue(req.body?.projectId),
+    projectName: cleanKioskValue(req.body?.projectName),
+    mediaId: cleanKioskValue(req.body?.mediaId),
+    mediaName: cleanKioskValue(req.body?.mediaName),
+    mediaType: cleanKioskValue(req.body?.mediaType),
+    message: cleanKioskValue(req.body?.message),
+    lastSeenAt: nowIso,
+  };
+
+  res.json({ ok: true });
+});
+
+app.get('/kiosk/status', (_req, res) => {
+  res.json(buildKioskStatusResponse());
 });
 
 app.get('/settings', async (_req, res, next) => {
