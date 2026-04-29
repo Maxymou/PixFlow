@@ -10,6 +10,7 @@ const KIOSK_PREVIEW_INTERVAL_MS = 1_000;
 const KIOSK_IMAGE_REFRESH_INTERVAL_MS = 30_000;
 const KIOSK_PREVIEW_WIDTH = 360;
 const KIOSK_PREVIEW_QUALITY = 0.55;
+const KIOSK_COMMAND_POLL_INTERVAL_MS = 1_000;
 
 const toMediaUrl = (item) => {
   if (!item?.file) return null;
@@ -26,6 +27,7 @@ export function PlayerView() {
   const [isVideoLoading, setIsVideoLoading] = useState(false);
   const [videoLoadMessage, setVideoLoadMessage] = useState('Chargement de la vidéo...');
   const [videoReady, setVideoReady] = useState(false);
+  const [kioskControlState, setKioskControlState] = useState('playing');
   const retryTimeoutRef = useRef(null);
   const videoRef = useRef(null);
   const videoLoadTimeoutRef = useRef(null);
@@ -34,6 +36,7 @@ export function PlayerView() {
   const videoLoadingOverlayTimeoutRef = useRef(null);
   const previewIntervalRef = useRef(null);
   const isSendingPreviewRef = useRef(false);
+  const lastAppliedCommandIdRef = useRef(0);
   const heartbeatPayloadRef = useRef({
     status: 'idle',
     projectId: null,
@@ -91,11 +94,12 @@ export function PlayerView() {
   }, [clearVideoBufferingTimeout, clearVideoLoadTimeout]);
 
   const next = useCallback((activePlaylistLength) => {
+    if (kioskControlState !== 'playing') return;
     setIndex((prev) => {
       if (activePlaylistLength === 0) return 0;
       return (prev + 1) % activePlaylistLength;
     });
-  }, []);
+  }, [kioskControlState]);
 
   const startVideoLoadTimeout = useCallback((item, itemSourceIndex, activePlaylistLength) => {
     clearVideoLoadTimeout();
@@ -333,6 +337,41 @@ export function PlayerView() {
     }
   }, []);
 
+  const applyKioskCommand = useCallback((command) => {
+    console.log('[PixFlow kiosk] Applying command:', command);
+    if (command === 'pause') {
+      setKioskControlState('paused');
+      videoRef.current?.pause?.();
+      sendHeartbeat({ status: 'paused', message: 'Kiosk paused' });
+      return;
+    }
+
+    if (command === 'stop') {
+      setKioskControlState('stopped');
+      const video = videoRef.current;
+      if (video) {
+        video.pause();
+        try {
+          video.currentTime = 0;
+        } catch {
+          // Ignore seek errors.
+        }
+      }
+      clearPreviewInterval();
+      sendHeartbeat({ status: 'stopped', message: 'Kiosk stopped' });
+      return;
+    }
+
+    if (command === 'play') {
+      setKioskControlState('playing');
+      const playPromise = videoRef.current?.play?.();
+      if (playPromise?.catch) {
+        playPromise.catch(() => {});
+      }
+      sendHeartbeat({ status: 'playing', message: 'Kiosk resumed' });
+    }
+  }, [clearPreviewInterval, sendHeartbeat]);
+
   const sendPreview = useCallback(async (partial = {}) => {
     if (isSendingPreviewRef.current) return;
     const mediaElement = partial.mediaElement || videoRef.current;
@@ -387,9 +426,45 @@ export function PlayerView() {
     return () => clearInterval(id);
   }, [sendHeartbeat]);
 
+  useEffect(() => {
+    let mounted = true;
+
+    const fetchCommand = async () => {
+      try {
+        const commandPayload = await api('/api/kiosk/command');
+        console.log('[PixFlow kiosk] Received command:', commandPayload);
+        if (!mounted || !commandPayload) return;
+        if (
+          typeof commandPayload.id === 'number'
+          && commandPayload.id > lastAppliedCommandIdRef.current
+        ) {
+          lastAppliedCommandIdRef.current = commandPayload.id;
+          applyKioskCommand(commandPayload.command);
+        }
+      } catch {
+        // Best effort only: never block player.
+      }
+    };
+
+    fetchCommand();
+    const id = setInterval(fetchCommand, KIOSK_COMMAND_POLL_INTERVAL_MS);
+    return () => {
+      mounted = false;
+      clearInterval(id);
+    };
+  }, [applyKioskCommand]);
+
   useEffect(() => () => clearPreviewInterval(), [clearPreviewInterval]);
 
   useEffect(() => {
+    if (kioskControlState === 'stopped') {
+      clearPreviewInterval();
+      sendHeartbeat({
+        status: 'stopped',
+        message: 'Kiosk stopped',
+      });
+      return;
+    }
     if (!currentItem || !currentUrl) {
       clearPreviewInterval();
       if (status === 'offline') {
@@ -419,7 +494,32 @@ export function PlayerView() {
     return () => {
       clearPreviewInterval();
     };
-  }, [clearPreviewInterval, currentItem, currentUrl, sendHeartbeat, status]);
+  }, [clearPreviewInterval, currentItem, currentUrl, kioskControlState, sendHeartbeat, status]);
+
+  useEffect(() => {
+    if (kioskControlState !== 'paused') return;
+    videoRef.current?.pause?.();
+  }, [currentItem, kioskControlState]);
+
+  useEffect(() => {
+    if (kioskControlState !== 'playing') return;
+    if (currentItem?.type !== 'video') return;
+    const playPromise = videoRef.current?.play?.();
+    if (playPromise?.catch) {
+      playPromise.catch(() => {});
+    }
+  }, [currentItem, kioskControlState]);
+
+  if (kioskControlState === 'stopped') {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center overflow-hidden bg-black px-8 text-center text-slate-200">
+        <div>
+          <h1 className="text-4xl font-semibold tracking-tight text-slate-100 md:text-6xl">PixFlow</h1>
+          <p className="mt-5 text-lg text-slate-400 md:text-2xl">Kiosk stopped</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!currentItem || !currentUrl) {
     if (playlist.length > 0 && activePlaylist.length > 0) {
@@ -486,6 +586,7 @@ export function PlayerView() {
           onCanPlay={() => {
             console.log('Video canplay:', currentUrl);
             markVideoReady();
+            if (kioskControlState !== 'playing') return;
             const playPromise = videoRef.current?.play();
             if (playPromise?.catch) {
               playPromise.catch((error) => {
@@ -500,9 +601,11 @@ export function PlayerView() {
           onPlaying={() => {
             console.log('Video playing:', currentUrl);
             markVideoReady();
-            sendHeartbeat({ status: 'playing', message: null });
-            sendPreview({ mediaElement: videoRef.current, status: 'playing' });
+            const heartbeatStatus = kioskControlState === 'paused' ? 'paused' : 'playing';
+            sendHeartbeat({ status: heartbeatStatus, message: null });
+            sendPreview({ mediaElement: videoRef.current, status: heartbeatStatus });
             clearPreviewInterval();
+            if (kioskControlState !== 'playing') return;
             previewIntervalRef.current = setInterval(() => {
               sendPreview({ mediaElement: videoRef.current, status: 'playing' });
             }, KIOSK_PREVIEW_INTERVAL_MS);
@@ -533,6 +636,7 @@ export function PlayerView() {
             startVideoLoadTimeout(currentItem, currentSourceIndex, activePlaylist.length);
           }}
           onEnded={() => {
+            if (kioskControlState !== 'playing') return;
             clearVideoLoadTimeout();
             clearVideoBufferingTimeout();
             clearVideoLoadingOverlayTimeout();
@@ -567,8 +671,10 @@ export function PlayerView() {
           draggable={false}
           onError={markCurrentFailed}
           onLoad={(event) => {
-            sendPreview({ mediaElement: event.currentTarget, status: 'playing' });
+            const previewStatus = kioskControlState === 'paused' ? 'paused' : 'playing';
+            sendPreview({ mediaElement: event.currentTarget, status: previewStatus });
             clearPreviewInterval();
+            if (kioskControlState !== 'playing') return;
             previewIntervalRef.current = setInterval(() => {
               sendPreview({ mediaElement: event.currentTarget, status: 'playing' });
             }, KIOSK_IMAGE_REFRESH_INTERVAL_MS);
