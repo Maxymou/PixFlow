@@ -13,6 +13,10 @@ export function Dashboard({ projects, onRefresh }) {
     message: 'No kiosk heartbeat received',
     lastSeenAt: null,
   });
+  const [kioskPreview, setKioskPreview] = useState({
+    available: false,
+    message: 'No preview available',
+  });
 
   const activeCount = projects.filter((p) => p.active).length;
   const inactiveCount = projects.length - activeCount;
@@ -39,14 +43,31 @@ export function Dashboard({ projects, onRefresh }) {
     const minutes = Math.floor(diffSeconds / 60);
     return `${minutes}m ago`;
   }, [kioskStatus.lastSeenAt]);
+  const previewAgeSeconds = useMemo(() => {
+    if (!kioskPreview?.capturedAt) return null;
+    const ts = new Date(kioskPreview.capturedAt).getTime();
+    if (!Number.isFinite(ts)) return null;
+    return Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  }, [kioskPreview?.capturedAt]);
+  const previewAgeLabel = useMemo(() => {
+    if (previewAgeSeconds === null) return null;
+    if (previewAgeSeconds <= 1) return 'just now';
+    if (previewAgeSeconds < 60) return `${previewAgeSeconds}s ago`;
+    return `${Math.floor(previewAgeSeconds / 60)}m ago`;
+  }, [previewAgeSeconds]);
+  const previewIsStale = (previewAgeSeconds ?? 0) > 30;
 
   useEffect(() => {
     let active = true;
-    const fetchKioskStatus = async () => {
+    const fetchKioskStatusAndPreview = async () => {
       try {
-        const payload = await api('/api/kiosk/status');
+        const [statusPayload, previewPayload] = await Promise.all([
+          api('/api/kiosk/status'),
+          api('/api/kiosk/preview'),
+        ]);
         if (!active) return;
-        setKioskStatus(payload);
+        setKioskStatus(statusPayload);
+        setKioskPreview(previewPayload);
       } catch {
         if (!active) return;
         setKioskStatus((current) => ({
@@ -58,8 +79,8 @@ export function Dashboard({ projects, onRefresh }) {
       }
     };
 
-    fetchKioskStatus();
-    const id = setInterval(fetchKioskStatus, 3000);
+    fetchKioskStatusAndPreview();
+    const id = setInterval(fetchKioskStatusAndPreview, 5000);
     return () => {
       active = false;
       clearInterval(id);
@@ -151,6 +172,34 @@ export function Dashboard({ projects, onRefresh }) {
             {kioskStatus.message && <div><span className="text-slate-500">Message:</span> {kioskStatus.message}</div>}
             <div><span className="text-slate-500">Last seen:</span> {lastSeenLabel}</div>
           </div>
+        </div>
+        <div className="mt-4 border-t border-slate-800/80 pt-4">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Live preview</p>
+            <div className="flex items-center gap-2">
+              {kioskStatus.online === false && (
+                <span className="rounded-full border border-rose-500/40 bg-rose-500/15 px-2 py-0.5 text-xs text-rose-300">Offline</span>
+              )}
+              {kioskPreview.available && previewIsStale && kioskStatus.online && (
+                <span className="rounded-full border border-amber-400/40 bg-amber-500/15 px-2 py-0.5 text-xs text-amber-200">Stale</span>
+              )}
+            </div>
+          </div>
+          {kioskPreview.available ? (
+            <div className="space-y-2">
+              <div className="overflow-hidden rounded-xl border border-slate-700 bg-black/40">
+                <img src={kioskPreview.imageDataUrl} alt="Kiosk live preview" className="h-44 w-full object-contain" />
+              </div>
+              <div className="text-xs text-slate-400">
+                <div>Last preview: {previewAgeLabel || 'unknown'}</div>
+                {kioskPreview.mediaName && <div>Media: {kioskPreview.mediaName}</div>}
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/20 px-3 py-6 text-center text-sm text-slate-400">
+              {kioskStatus.online ? 'No preview available' : 'Kiosk offline'}
+            </div>
+          )}
         </div>
       </div>
 
