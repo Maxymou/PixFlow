@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { ToggleSwitch } from './ToggleSwitch';
@@ -7,9 +7,64 @@ export function Dashboard({ projects, onRefresh }) {
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
   const [busyProjectIds, setBusyProjectIds] = useState(new Set());
+  const [kioskStatus, setKioskStatus] = useState({
+    online: false,
+    status: 'offline',
+    message: 'No kiosk heartbeat received',
+    lastSeenAt: null,
+  });
 
   const activeCount = projects.filter((p) => p.active).length;
   const inactiveCount = projects.length - activeCount;
+  const kioskLabel = useMemo(() => {
+    const status = kioskStatus.status || 'offline';
+    const labels = {
+      playing: 'Playing',
+      loading: 'Loading',
+      idle: 'Idle',
+      error: 'Error',
+      no_active_project: 'No active project selected',
+      offline: 'Offline',
+    };
+    return labels[status] || status;
+  }, [kioskStatus.status]);
+
+  const lastSeenLabel = useMemo(() => {
+    if (!kioskStatus.lastSeenAt) return 'Never';
+    const ms = new Date(kioskStatus.lastSeenAt).getTime();
+    if (!Number.isFinite(ms)) return 'Never';
+    const diffSeconds = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+    if (diffSeconds <= 1) return 'just now';
+    if (diffSeconds < 60) return `${diffSeconds}s ago`;
+    const minutes = Math.floor(diffSeconds / 60);
+    return `${minutes}m ago`;
+  }, [kioskStatus.lastSeenAt]);
+
+  useEffect(() => {
+    let active = true;
+    const fetchKioskStatus = async () => {
+      try {
+        const payload = await api('/api/kiosk/status');
+        if (!active) return;
+        setKioskStatus(payload);
+      } catch {
+        if (!active) return;
+        setKioskStatus((current) => ({
+          ...current,
+          online: false,
+          status: 'offline',
+          message: 'Kiosk status unavailable',
+        }));
+      }
+    };
+
+    fetchKioskStatus();
+    const id = setInterval(fetchKioskStatus, 3000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, []);
 
   const createProject = async (e) => {
     e.preventDefault();
@@ -71,6 +126,30 @@ export function Dashboard({ projects, onRefresh }) {
           <div className="rounded-lg border border-slate-700 bg-slate-950/30 px-3 py-2">
             <span className="block text-2xl font-bold text-slate-300">{inactiveCount}</span>
             <span className="text-xs text-slate-500">Inactive</span>
+          </div>
+        </div>
+        <div className="mt-4 border-t border-slate-800/80 pt-4">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Kiosk live</p>
+            <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+              kioskStatus.status === 'playing'
+                ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+                : kioskStatus.status === 'loading' || kioskStatus.status === 'no_active_project'
+                  ? 'border-amber-400/40 bg-amber-500/15 text-amber-200'
+                  : kioskStatus.status === 'error' || kioskStatus.status === 'offline'
+                    ? 'border-rose-500/40 bg-rose-500/15 text-rose-300'
+                    : 'border-slate-700 bg-slate-900 text-slate-300'
+            }`}>
+              {kioskStatus.online ? 'Online' : kioskLabel}
+            </span>
+          </div>
+          <div className="space-y-1 text-sm text-slate-300">
+            <div><span className="text-slate-500">State:</span> {kioskLabel}</div>
+            {kioskStatus.projectName && <div><span className="text-slate-500">Project:</span> {kioskStatus.projectName}</div>}
+            {kioskStatus.mediaName && <div><span className="text-slate-500">Media:</span> {kioskStatus.mediaName}</div>}
+            {kioskStatus.mediaType && <div><span className="text-slate-500">Type:</span> {kioskStatus.mediaType === 'video' ? 'Video' : 'Image'}</div>}
+            {kioskStatus.message && <div><span className="text-slate-500">Message:</span> {kioskStatus.message}</div>}
+            <div><span className="text-slate-500">Last seen:</span> {lastSeenLabel}</div>
           </div>
         </div>
       </div>

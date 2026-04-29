@@ -5,6 +5,7 @@ const PLAYLIST_REFRESH_MS = 30_000;
 const PLAYLIST_RETRY_MS = 10_000;
 const VIDEO_START_TIMEOUT_MS = 60_000;
 const VIDEO_MAX_RECOVERIES = 2;
+const KIOSK_HEARTBEAT_INTERVAL_MS = 5_000;
 
 const toMediaUrl = (item) => {
   if (!item?.file) return null;
@@ -27,6 +28,15 @@ export function PlayerView() {
   const videoRecoveryAttemptsRef = useRef(0);
   const videoBufferingTimeoutRef = useRef(null);
   const videoLoadingOverlayTimeoutRef = useRef(null);
+  const heartbeatPayloadRef = useRef({
+    status: 'idle',
+    projectId: null,
+    projectName: null,
+    mediaId: null,
+    mediaName: null,
+    mediaType: null,
+    message: null,
+  });
 
   const clearRetry = useCallback(() => {
     if (retryTimeoutRef.current) {
@@ -302,6 +312,57 @@ export function PlayerView() {
     next(activePlaylist.length);
   }, [activePlaylist.length, currentItem, currentSourceIndex, markMediaFailed, next]);
 
+  const sendHeartbeat = useCallback(async (partial = {}) => {
+    heartbeatPayloadRef.current = {
+      ...heartbeatPayloadRef.current,
+      ...partial,
+    };
+    try {
+      await api('/api/kiosk/heartbeat', {
+        method: 'POST',
+        body: JSON.stringify(heartbeatPayloadRef.current),
+      });
+    } catch {
+      // Best effort only: never block player.
+    }
+  }, []);
+
+  useEffect(() => {
+    sendHeartbeat({ status: 'idle', message: 'Kiosk loaded' });
+    const id = setInterval(() => {
+      sendHeartbeat();
+    }, KIOSK_HEARTBEAT_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [sendHeartbeat]);
+
+  useEffect(() => {
+    if (!currentItem || !currentUrl) {
+      if (status === 'offline') {
+        sendHeartbeat({ status: 'idle', message: 'Backend offline' });
+      } else {
+        sendHeartbeat({
+          status: 'no_active_project',
+          projectId: null,
+          projectName: null,
+          mediaId: null,
+          mediaName: null,
+          mediaType: null,
+          message: 'No active project selected',
+        });
+      }
+      return;
+    }
+    sendHeartbeat({
+      projectId: currentItem.projectId || null,
+      projectName: currentItem.projectName || null,
+      mediaId: currentItem.id || null,
+      mediaName: currentItem.originalName || currentItem.file || null,
+      mediaType: currentItem.type || null,
+      status: currentItem.type === 'video' ? 'loading' : 'playing',
+      message: currentItem.type === 'video' ? 'Loading media' : null,
+    });
+  }, [currentItem, currentUrl, sendHeartbeat, status]);
+
   if (!currentItem || !currentUrl) {
     if (playlist.length > 0 && activePlaylist.length > 0) {
       return (
@@ -362,6 +423,7 @@ export function PlayerView() {
           onLoadedData={() => {
             console.log('Video loadeddata:', currentUrl);
             markVideoReady();
+            sendHeartbeat({ status: 'loading', message: 'Media ready' });
           }}
           onCanPlay={() => {
             console.log('Video canplay:', currentUrl);
@@ -380,6 +442,7 @@ export function PlayerView() {
           onPlaying={() => {
             console.log('Video playing:', currentUrl);
             markVideoReady();
+            sendHeartbeat({ status: 'playing', message: null });
           }}
           onWaiting={() => {
             console.warn('Video waiting/buffering:', currentUrl);
@@ -413,6 +476,7 @@ export function PlayerView() {
             setIsVideoLoading(false);
             setVideoReady(false);
             setVideoLoadMessage('Chargement de la vidéo...');
+            sendHeartbeat({ status: 'idle', message: 'Media ended' });
             next(activePlaylist.length);
           }}
           onError={(event) => {
@@ -425,6 +489,7 @@ export function PlayerView() {
             });
             setIsVideoLoading(true);
             setVideoLoadMessage('Erreur vidéo, passage au média suivant...');
+            sendHeartbeat({ status: 'error', message: 'Failed to load media' });
             markCurrentFailed();
           }}
         />
