@@ -17,6 +17,15 @@
     const API = 'http://backend:4000';
     let playlist = [];
     let idx = 0;
+    let kioskState = 'idle';
+    let currentItem = null;
+    let currentElement = null;
+    let imageTimer = null;
+    let lastCommandId = 0;
+    let stoppedByCommand = false;
+
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const stage = document.getElementById('stage');
 
     async function fetchPlaylist() {
       try {
@@ -29,24 +38,81 @@
       } catch (e) { console.error(e); }
     }
 
+    function renderStoppedScreen() {
+      stage.innerHTML = '<div style="color:#67e8f9;font-family:sans-serif;text-align:center;line-height:1.6"><div style="font-size:34px;font-weight:700">PixFlow</div><div style="font-size:20px;opacity:.8">Kiosk stopped</div></div>';
+    }
+
+    function clearImageTimer() {
+      if (!imageTimer) return;
+      clearTimeout(imageTimer);
+      imageTimer = null;
+    }
+
+    async function applyCommand(command) {
+      if (!command || command.id === lastCommandId) return;
+      lastCommandId = command.id;
+      if (command.command === 'pause') {
+        kioskState = 'paused';
+        if (currentElement?.tagName === 'VIDEO') currentElement.pause();
+        clearImageTimer();
+      } else if (command.command === 'play') {
+        stoppedByCommand = false;
+        kioskState = 'playing';
+        if (currentElement?.tagName === 'VIDEO') currentElement.play().catch(() => {});
+      } else if (command.command === 'stop') {
+        kioskState = 'stopped';
+        stoppedByCommand = true;
+        clearImageTimer();
+        if (currentElement?.tagName === 'VIDEO') {
+          currentElement.pause();
+          currentElement.currentTime = 0;
+        }
+        currentItem = null;
+        currentElement = null;
+        renderStoppedScreen();
+      }
+    }
+
+    async function fetchCommand() {
+      try {
+        const res = await fetch(`${API}/kiosk/command`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const payload = await res.json();
+        await applyCommand(payload);
+      } catch (e) {}
+    }
+
     async function showLoop() {
-      const stage = document.getElementById('stage');
       while (true) {
+        if (kioskState === 'stopped' || stoppedByCommand) {
+          renderStoppedScreen();
+          await sleep(250);
+          continue;
+        }
+        if (kioskState === 'paused') {
+          await sleep(250);
+          continue;
+        }
         if (!playlist.length) {
+          kioskState = 'no_active_project';
           stage.innerHTML = '<div style="color:#67e8f9;font-family:sans-serif">Waiting for media…</div>';
-          await new Promise(r => setTimeout(r, 2000));
+          await sleep(2000);
           continue;
         }
 
+        kioskState = 'loading';
         const item = playlist[idx % playlist.length];
+        currentItem = item;
         stage.innerHTML = '';
 
         if (item.type === 'video') {
+          kioskState = 'playing';
           const v = document.createElement('video');
           v.src = `${API}${item.file}`;
           v.autoplay = true;
           v.muted = true;
           v.playsInline = true;
+          currentElement = v;
           v.onended = () => {};
           stage.appendChild(v);
           requestAnimationFrame(() => v.classList.add('show'));
@@ -56,19 +122,71 @@
             setTimeout(resolve, 120000);
           });
         } else {
+          kioskState = 'playing';
           const i = document.createElement('img');
           i.src = `${API}${item.file}`;
+          currentElement = i;
           stage.appendChild(i);
           requestAnimationFrame(() => i.classList.add('show'));
-          await new Promise(r => setTimeout(r, (item.duration || 5) * 1000));
+          await new Promise((resolve) => {
+            imageTimer = setTimeout(resolve, (item.duration || 5) * 1000);
+          });
+          clearImageTimer();
         }
 
         idx = (idx + 1) % playlist.length;
       }
     }
 
+    async function sendHeartbeat() {
+      const message = kioskState === 'paused'
+        ? 'Kiosk paused'
+        : kioskState === 'stopped'
+          ? 'Kiosk stopped'
+          : kioskState === 'playing'
+            ? 'Kiosk resumed'
+            : kioskState === 'no_active_project' ? 'No active project' : null;
+      try {
+        await fetch(`${API}/kiosk/heartbeat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: kioskState,
+            mediaName: currentItem?.name || null,
+            mediaType: currentItem?.type || null,
+            message,
+          }),
+        });
+      } catch (e) {}
+    }
+
+    async function sendPreview() {
+      if (!currentElement || kioskState === 'stopped') return;
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 320;
+        canvas.height = 180;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(currentElement, 0, 0, canvas.width, canvas.height);
+        const imageDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        await fetch(`${API}/kiosk/preview`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageDataUrl,
+            mediaName: currentItem?.name || null,
+            mediaType: currentItem?.type || null,
+            status: kioskState,
+          }),
+        });
+      } catch (e) {}
+    }
+
     fetchPlaylist();
     setInterval(fetchPlaylist, 5000);
+    setInterval(fetchCommand, 1000);
+    setInterval(sendHeartbeat, 1000);
+    setInterval(sendPreview, 1000);
     showLoop();
   </script>
 </body>
