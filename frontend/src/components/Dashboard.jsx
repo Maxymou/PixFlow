@@ -145,23 +145,32 @@ export function Dashboard({ projects, onRefresh }) {
           </div>
 
           <div className="space-y-3 sm:w-44">
-            <div className="flex items-center gap-2 whitespace-nowrap">
-              <button
-                type="button"
-                disabled={kioskIsOffline || kioskCommandLoading}
-                onClick={() => sendKioskCommand(pausePlayCommand)}
-                className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-sm font-medium text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {kioskCommandLoading ? '…' : pausePlayLabel}
-              </button>
-              <button
-                type="button"
-                disabled={kioskIsOffline || kioskCommandLoading}
-                onClick={() => sendKioskCommand('stop')}
-                className="rounded-lg border border-rose-500/50 bg-rose-500/10 px-3 py-2 text-sm font-medium text-rose-200 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {kioskCommandLoading ? '…' : 'Arrêter'}
-              </button>
+            <div className="kiosk-control-row">
+              <div className={`kiosk-play-container ${pausePlayCommand === 'pause' ? 'is-playing' : ''} ${kioskCommandLoading ? 'is-loading' : ''}`}>
+                <button
+                  type="button"
+                  disabled={kioskIsOffline || kioskCommandLoading}
+                  onClick={() => sendKioskCommand(pausePlayCommand)}
+                  className="kiosk-play-btn"
+                  aria-label={pausePlayLabel}
+                  title={pausePlayLabel}
+                >
+                  <span className="kiosk-play-icon" aria-hidden="true" />
+                  <span className="kiosk-pause-icon" aria-hidden="true" />
+                </button>
+              </div>
+              <div className={`kiosk-stop-container ${kioskCommandLoading ? 'is-loading' : ''}`}>
+                <button
+                  type="button"
+                  disabled={kioskIsOffline || kioskCommandLoading}
+                  onClick={() => sendKioskCommand('stop')}
+                  className="kiosk-stop-btn"
+                  aria-label="Arrêter"
+                  title="Arrêter"
+                >
+                  <span className="kiosk-stop-icon" aria-hidden="true" />
+                </button>
+              </div>
             </div>
 
             <div className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm">
