@@ -222,3 +222,188 @@ body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
   animation: video-loading-bar 1.4s ease-in-out infinite;
   will-change: transform;
 }
+
+/* ── Kiosk control buttons ─────────────────────────────── */
+.kiosk-control-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  white-space: nowrap;
+}
+
+.kiosk-play-container,
+.kiosk-stop-container {
+  position: relative;
+  border-radius: 9999px;
+}
+
+.kiosk-play-container {
+  width: 68px;
+  height: 68px;
+}
+
+.kiosk-stop-container {
+  width: 56px;
+  height: 56px;
+}
+
+.kiosk-play-btn,
+.kiosk-stop-btn {
+  position: relative;
+  appearance: none;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 0;
+  background: conic-gradient(#ff6347, #ff6347);
+  cursor: pointer;
+  outline: none;
+  transition: transform 200ms ease, opacity 200ms ease;
+}
+
+.kiosk-play-btn:hover,
+.kiosk-stop-btn:hover {
+  transform: scale(1.05);
+}
+
+.kiosk-play-btn:active,
+.kiosk-stop-btn:active {
+  transform: scale(0.98);
+}
+
+.kiosk-play-btn::before,
+.kiosk-stop-btn::before {
+  content: '';
+  position: absolute;
+  width: 93%;
+  height: 93%;
+  background-color: #000;
+  border-radius: 50%;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.kiosk-play-btn:focus-visible,
+.kiosk-stop-btn:focus-visible {
+  box-shadow: 0 0 0 2px #22d3ee;
+}
+
+.kiosk-play-btn:disabled,
+.kiosk-stop-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.kiosk-play-btn:disabled:hover,
+.kiosk-stop-btn:disabled:hover,
+.kiosk-play-btn:disabled:active,
+.kiosk-stop-btn:disabled:active {
+  transform: none;
+}
+
+.kiosk-play-icon {
+  position: absolute;
+  z-index: 1;
+  width: 22px;
+  height: 22px;
+  left: 56%;
+  top: 50%;
+  background-color: #ff6347;
+  transform: translate(-56%, -50%) rotate(90deg);
+  clip-path: polygon(50% 15%, 0% 100%, 100% 100%);
+  transition: all 300ms ease-in-out;
+  pointer-events: none;
+}
+
+.kiosk-pause-icon {
+  position: absolute;
+  z-index: 1;
+  width: 22px;
+  height: 22px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.kiosk-pause-icon::before,
+.kiosk-pause-icon::after {
+  content: '';
+  position: absolute;
+  width: 0;
+  height: 100%;
+  background-color: #ff6347;
+}
+
+.kiosk-pause-icon::before {
+  left: 0;
+}
+
+.kiosk-pause-icon::after {
+  right: 0;
+}
+
+.kiosk-play-container.is-playing .kiosk-play-btn {
+  animation: kiosk-border-spin-infinite 1.5s linear infinite;
+  background: conic-gradient(#ff6347 0% 75%, transparent 75% 100%);
+}
+
+.kiosk-play-container.is-playing .kiosk-play-icon {
+  clip-path: polygon(0 100%, 0% 100%, 100% 100%);
+}
+
+.kiosk-play-container.is-playing .kiosk-pause-icon::before {
+  animation: kiosk-reveal 300ms ease-in-out 150ms 1;
+  animation-fill-mode: forwards;
+}
+
+.kiosk-play-container.is-playing .kiosk-pause-icon::after {
+  animation: kiosk-reveal 300ms ease-in-out 260ms 1;
+  animation-fill-mode: forwards;
+}
+
+.kiosk-stop-icon {
+  position: absolute;
+  z-index: 1;
+  width: 20px;
+  height: 20px;
+  left: 50%;
+  top: 50%;
+  background-color: #ff6347;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: transform 700ms ease-in-out;
+}
+
+.kiosk-stop-btn:active .kiosk-stop-icon {
+  transform: translate(-50%, -50%) rotate(180deg);
+}
+
+.kiosk-stop-container.is-loading .kiosk-stop-btn {
+  animation: kiosk-border-animate 700ms ease-in-out infinite;
+}
+
+@keyframes kiosk-border-spin-infinite {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes kiosk-reveal {
+  0% { width: 0; }
+  100% { width: 35%; }
+}
+
+@keyframes kiosk-border-animate {
+  0% {
+    transform: rotate(0);
+    background: conic-gradient(#ff6347, transparent 20%);
+  }
+  80% {
+    background: conic-gradient(#ff6347, transparent 90%);
+  }
+  100% {
+    transform: rotate(360deg);
+    background: conic-gradient(#ff6347, #ff6347);
+  }
+}
