@@ -74,6 +74,7 @@ const DEFAULT_DEBUG_COMMANDS = [
 ];
 const DEBUG_COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 const DEBUG_OUTPUT_MAX_LENGTH = 8000;
+const DEBUG_COMMAND_SHELL = process.env.DEBUG_COMMAND_SHELL || 'sh';
 let latestKioskCommand = {
   id: 0,
   command: 'play',
@@ -498,7 +499,7 @@ const trimCommandOutput = (value) => {
 };
 
 const runShellCommand = (command, timeoutMs = DEBUG_COMMAND_TIMEOUT_MS) => new Promise((resolve, reject) => {
-  const child = spawn('bash', ['-lc', command], {
+  const child = spawn(DEBUG_COMMAND_SHELL, ['-lc', command], {
     cwd: '/home/maxymou/PixFlow',
   });
 
@@ -564,6 +565,25 @@ const validateDebugCommands = (commands) => {
     seenIds.add(cmd.id);
     return cmd;
   });
+};
+
+const getDefaultDebugCommandById = (id) => {
+  if (!id) return null;
+  return DEFAULT_DEBUG_COMMANDS.find((command) => command.id === id) || null;
+};
+
+const resolveDebugCommand = (settings, id) => {
+  const debugCommands = getDebugCommandsFromSettings(settings);
+  const fromSettings = debugCommands.find((item) => item.id === id) || null;
+
+  if (fromSettings?.command?.trim()) {
+    return fromSettings;
+  }
+
+  const fallback = getDefaultDebugCommandById(id);
+  if (!fallback) return null;
+
+  return normalizeDebugCommand(fallback);
 };
 
 const getDebugCommandsFromSettings = (settings) => {
@@ -1303,18 +1323,29 @@ app.post(['/api/debug/action', '/debug/action'], async (req, res) => {
 
   try {
     const settings = await readJson(settingsFile);
-    const debugCommands = getDebugCommandsFromSettings(settings);
-    const target = debugCommands.find((item) => item.id === id);
+    const target = resolveDebugCommand(settings, id);
 
     if (!target) {
       return res.status(404).json({ ok: false, id, message: 'Commande introuvable.' });
     }
 
-    const result = await runShellCommand(target.command);
+    const command = typeof target.command === 'string' ? target.command.trim() : '';
+    if (!command) {
+      return res.status(400).json({
+        ok: false,
+        id,
+        command: '',
+        stdout: '',
+        stderr: '',
+        message: 'Commande vide ou non configurée.',
+      });
+    }
+
+    const result = await runShellCommand(command);
     return res.json({
       ok: true,
       id,
-      command: target.command,
+      command,
       stdout: result.stdout || '',
       stderr: result.stderr || '',
       message: 'Commande exécutée.',
@@ -1327,7 +1358,7 @@ app.post(['/api/debug/action', '/debug/action'], async (req, res) => {
       command: '',
       stdout: result.stdout || '',
       stderr: result.stderr || error.message || '',
-      message: error.message || 'Erreur pendant l’exécution de la commande.',
+      message: `Erreur pendant l’exécution de la commande. ${error.message || ''}`.trim(),
     });
   }
 });
