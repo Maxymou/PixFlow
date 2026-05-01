@@ -103,7 +103,23 @@ maxymou ALL=(root) NOPASSWD: /usr/bin/systemctl restart pixflow-kiosk
 
 ⚠️ Ne pas exposer le panneau Débug sur Internet.
 
-> En mode Raspberry Docker, les commandes Débug sont exécutées depuis le backend. Les commandes système hôte (ex: `systemctl`, `sudo`, chemins hôte) doivent passer par un helper côté hôte ou via des volumes/permissions explicitement configurés.
+## Debug Host API
+
+Le menu Débug exécute les commandes système via un helper côté Raspberry :
+
+- service : `pixflow-debug-api.service`
+- port local : `4877`
+- variable backend : `DEBUG_HOST_API_URL=http://host.docker.internal:4877`
+
+Commandes utiles :
+
+```bash
+sudo systemctl status pixflow-debug-api --no-pager -l
+curl http://127.0.0.1:4877/commands
+curl -X POST http://127.0.0.1:4877/action \
+  -H "Content-Type: application/json" \
+  -d '{"id":"restart-kiosk"}'
+```
 
 ## DEV installation (Proxmox / server)
 ```bash

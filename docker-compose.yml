@@ -11,6 +11,7 @@ services:
       - VIDEO_MAX_WIDTH=1920
       - VIDEO_MAX_FPS=30
       - HOTSPOT_HOST_API_URL=http://host.docker.internal:4876
+      - DEBUG_HOST_API_URL=http://host.docker.internal:4877
     volumes:
       - pixflow_data:/data
     extra_hosts:
