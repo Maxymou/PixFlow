@@ -5,6 +5,7 @@ const INITIAL_FORM = {
   ssid: '',
   password: '',
 };
+const DEFAULT_PAUSE_SCREEN = { mode: 'default', mediaType: null, mediaFile: null };
 
 const OFFLINE_ERROR = 'Impossible de contacter PixFlow. Vérifiez que le serveur est en ligne.';
 
@@ -37,6 +38,11 @@ export function UserMenu({ open, onClose }) {
   const [isHotspotSaving, setIsHotspotSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [pauseScreen, setPauseScreen] = useState(DEFAULT_PAUSE_SCREEN);
+  const [pauseScreenDraft, setPauseScreenDraft] = useState(DEFAULT_PAUSE_SCREEN);
+  const [pausePreviewUrl, setPausePreviewUrl] = useState('');
+  const [pauseUploadFile, setPauseUploadFile] = useState(null);
+  const [isPauseSaving, setIsPauseSaving] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -82,6 +88,14 @@ export function UserMenu({ open, onClose }) {
           ethernetConnected: settings?.wifi?.ethernetConnected ?? false,
         });
         setStatusMessage('');
+        const resolvedPauseScreen = {
+          ...DEFAULT_PAUSE_SCREEN,
+          ...(settings?.pauseScreen || {}),
+        };
+        setPauseScreen(resolvedPauseScreen);
+        setPauseScreenDraft(resolvedPauseScreen);
+        setPausePreviewUrl(resolvedPauseScreen.mediaFile || '');
+        setPauseUploadFile(null);
       } catch (error) {
         if (!mounted) return;
         setStatusMessage('');
@@ -103,6 +117,9 @@ export function UserMenu({ open, onClose }) {
   };
 
   const handleCancel = () => setActivePanel('main');
+  const pauseScreenLabel = pauseScreen.mode === 'custom'
+    ? (pauseScreen.mediaType === 'video' ? 'Vidéo perso' : 'Image perso')
+    : 'Par défaut';
 
   const handleHotspotToggle = async (event) => {
     const nextEnabled = event.target.checked;
@@ -190,6 +207,56 @@ export function UserMenu({ open, onClose }) {
       setIsSaving(false);
     }
   };
+  const handlePauseScreenFileChange = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setPauseUploadFile(file);
+    const url = URL.createObjectURL(file);
+    setPausePreviewUrl(url);
+    setPauseScreenDraft((prev) => ({ ...prev, mode: 'custom', mediaType: file.type.startsWith('video/') ? 'video' : 'image' }));
+  };
+
+  const handlePauseScreenCancel = () => {
+    setPauseScreenDraft(pauseScreen);
+    setPausePreviewUrl(pauseScreen.mediaFile || '');
+    setPauseUploadFile(null);
+    setActivePanel('main');
+  };
+
+  const handlePauseScreenSave = async (event) => {
+    event.preventDefault();
+    setIsPauseSaving(true);
+    setStatusMessage('');
+    setErrorMessage('');
+    try {
+      if (pauseScreenDraft.mode === 'default') {
+        const updated = await api('/api/settings/pause-screen', { method: 'PATCH', body: JSON.stringify({ mode: 'default' }) });
+        const nextPauseScreen = { ...DEFAULT_PAUSE_SCREEN, ...(updated?.pauseScreen || {}) };
+        setPauseScreen(nextPauseScreen);
+        setPauseScreenDraft(nextPauseScreen);
+        setPausePreviewUrl('');
+      } else {
+        if (pauseUploadFile) {
+          const formData = new FormData();
+          formData.append('file', pauseUploadFile);
+          const updated = await api('/api/settings/pause-screen/upload', { method: 'POST', body: formData });
+          const nextPauseScreen = { ...DEFAULT_PAUSE_SCREEN, ...(updated?.pauseScreen || {}) };
+          setPauseScreen(nextPauseScreen);
+          setPauseScreenDraft(nextPauseScreen);
+          setPausePreviewUrl(nextPauseScreen.mediaFile || '');
+          setPauseUploadFile(null);
+        } else {
+          await api('/api/settings/pause-screen', { method: 'PATCH', body: JSON.stringify({ mode: 'custom' }) });
+        }
+      }
+      setStatusMessage('Écran de pause enregistré.');
+      setActivePanel('main');
+    } catch (error) {
+      setErrorMessage(parseApiError(error));
+    } finally {
+      setIsPauseSaving(false);
+    }
+  };
 
   if (!open) return null;
 
@@ -203,7 +270,7 @@ export function UserMenu({ open, onClose }) {
       <aside
         role="dialog"
         aria-modal="true"
-        aria-label={activePanel === 'hotspot' ? 'HotSpot Wi-Fi' : 'Paramètres PixFlow'}
+        aria-label={activePanel === 'hotspot' ? 'HotSpot Wi-Fi' : activePanel === 'pauseScreen' ? 'Écran de pause' : 'Paramètres PixFlow'}
         className="fixed left-0 top-0 z-50 h-full w-[86vw] max-w-sm border-r border-slate-800 bg-slate-950 shadow-2xl md:max-w-md"
       >
         <div className="flex h-full flex-col">
@@ -228,6 +295,19 @@ export function UserMenu({ open, onClose }) {
                       <span className="text-lg text-slate-400">›</span>
                     </div>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setActivePanel('pauseScreen')}
+                    className="w-full rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-3 text-left transition hover:bg-slate-900"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-slate-100">Écran de pause</p>
+                        <p className="text-xs text-slate-400">{pauseScreenLabel}</p>
+                      </div>
+                      <span className="text-lg text-slate-400">›</span>
+                    </div>
+                  </button>
                 </div>
                 <div className="mt-auto flex items-center justify-end border-t border-slate-800 px-4 py-4 md:px-6">
                   <button
@@ -240,7 +320,7 @@ export function UserMenu({ open, onClose }) {
                 </div>
               </div>
             </>
-          ) : (
+          ) : activePanel === 'hotspot' ? (
             <form onSubmit={handleSave} className="flex flex-1 flex-col">
               <div className="border-b border-slate-800 px-4 py-4 md:px-6">
                 <button
@@ -318,6 +398,37 @@ export function UserMenu({ open, onClose }) {
                 >
                   {isSaving ? 'Enregistrement…' : 'Enregistrer'}
                 </button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handlePauseScreenSave} className="flex flex-1 flex-col">
+              <div className="border-b border-slate-800 px-4 py-4 md:px-6">
+                <button type="button" onClick={() => setActivePanel('main')} className="mb-2 text-sm text-slate-300 transition hover:text-slate-100">&lt; Retour</button>
+                <h2 className="text-lg font-semibold text-slate-100">Écran de pause</h2>
+                <p className="text-sm text-slate-400">Contenu affiché quand le kiosque est arrêté</p>
+              </div>
+              <div className="flex-1 space-y-4 overflow-y-auto px-4 py-5 md:px-6">
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm text-slate-200"><input type="radio" name="pauseMode" checked={pauseScreenDraft.mode === 'default'} onChange={() => setPauseScreenDraft((prev) => ({ ...prev, mode: 'default' }))} /> Par défaut</label>
+                  <label className="flex items-center gap-2 text-sm text-slate-200"><input type="radio" name="pauseMode" checked={pauseScreenDraft.mode === 'custom'} onChange={() => setPauseScreenDraft((prev) => ({ ...prev, mode: 'custom' }))} /> Personnaliser</label>
+                </div>
+                {pauseScreenDraft.mode === 'default' ? (
+                  <div className="flex aspect-video items-center justify-center rounded-lg border border-slate-700 bg-black text-center">
+                    <div><p className="text-lg font-semibold text-slate-100">PixFlow</p><p className="text-sm text-slate-400">Kiosk stopped</p></div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <input type="file" accept="image/*,video/*" onChange={handlePauseScreenFileChange} className="block w-full text-sm text-slate-300 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-2 file:text-slate-200 hover:file:bg-slate-700" />
+                    {pausePreviewUrl && (pauseScreenDraft.mediaType === 'video' ? <video src={pausePreviewUrl} controls muted loop playsInline className="max-h-64 w-full rounded-lg border border-slate-700 bg-black object-contain" /> : <img src={pausePreviewUrl} alt="" className="max-h-64 w-full rounded-lg border border-slate-700 bg-black object-contain" />)}
+                    <p className="text-sm text-slate-400">{pauseScreenDraft.mediaType === 'video' ? 'Vidéo perso' : 'Image perso'}</p>
+                  </div>
+                )}
+                {statusMessage && !errorMessage && <p className="text-sm text-emerald-400">{statusMessage}</p>}
+                {errorMessage && <p className="text-sm text-rose-400">{errorMessage}</p>}
+              </div>
+              <div className="mt-auto flex items-center justify-end gap-3 border-t border-slate-800 px-4 py-4 md:px-6">
+                <button type="button" onClick={handlePauseScreenCancel} className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:bg-slate-800">Annuler</button>
+                <button type="submit" disabled={isPauseSaving} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60">{isPauseSaving ? 'Enregistrement…' : 'Enregistrer'}</button>
               </div>
             </form>
           )}

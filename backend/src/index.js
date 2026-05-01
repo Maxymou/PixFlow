@@ -12,11 +12,17 @@ const port = Number(process.env.PORT || 4000);
 const dataRoot = process.env.DATA_ROOT || '/data';
 const incomingDir = path.join(dataRoot, 'incoming');
 const mediaDir = path.join(dataRoot, 'media');
+const pauseScreenDir = path.join(dataRoot, 'pause-screen');
 const projectsDir = path.join(dataRoot, 'projects');
 const projectsFile = path.join(projectsDir, 'projects.json');
 const mediaFile = path.join(projectsDir, 'media.json');
 const playlistFile = path.join(dataRoot, 'playlist.json');
 const settingsFile = path.join(dataRoot, 'settings.json');
+const DEFAULT_PAUSE_SCREEN = {
+  mode: 'default',
+  mediaType: null,
+  mediaFile: null,
+};
 
 const DEFAULT_MAX_UPLOAD_SIZE_BYTES = 500 * 1024 * 1024;
 const MAX_UPLOAD_SIZE_BYTES = Number(process.env.MAX_UPLOAD_SIZE_BYTES || DEFAULT_MAX_UPLOAD_SIZE_BYTES);
@@ -70,6 +76,9 @@ app.use('/media', express.static(mediaDir, {
     }
   },
 }));
+app.use('/media/pause-screen', express.static(pauseScreenDir, {
+  maxAge: '1d',
+}));
 
 const storage = multer.diskStorage({
   destination: async (_req, _file, cb) => {
@@ -107,8 +116,9 @@ const upload = multer({
 const ensureFiles = async () => {
   await fs.mkdir(incomingDir, { recursive: true });
   await fs.mkdir(mediaDir, { recursive: true });
+  await fs.mkdir(pauseScreenDir, { recursive: true });
   await fs.mkdir(projectsDir, { recursive: true });
-  for (const [filePath, initial] of [[projectsFile, []], [mediaFile, []], [playlistFile, []], [settingsFile, { wifi: { ssid: 'PixFlow', password: 'pixflow1234' } }]]) {
+  for (const [filePath, initial] of [[projectsFile, []], [mediaFile, []], [playlistFile, []], [settingsFile, { wifi: { ssid: 'PixFlow', password: 'pixflow1234' }, pauseScreen: DEFAULT_PAUSE_SCREEN }]]) {
     try {
       await fs.access(filePath);
     } catch {
@@ -608,6 +618,10 @@ const buildSettingsResponse = async () => {
 
   return {
     ...settings,
+    pauseScreen: {
+      ...DEFAULT_PAUSE_SCREEN,
+      ...(settings.pauseScreen || {}),
+    },
     wifi: {
       ...wifi,
       hotspotEnabled,
@@ -926,6 +940,59 @@ app.patch('/settings/hotspot', async (req, res, next) => {
     console.error('[PixFlow] Failed to toggle hotspot:', error);
     res.status(500).json({ error: 'Impossible de modifier l’état du hotspot Wi-Fi.' });
   }
+});
+
+app.patch('/settings/pause-screen', async (req, res, next) => {
+  try {
+    const mode = typeof req.body?.mode === 'string' ? req.body.mode.trim().toLowerCase() : '';
+    if (!['default', 'custom'].includes(mode)) {
+      return res.status(400).json({ error: 'mode must be "default" or "custom"' });
+    }
+
+    const settings = await readJson(settingsFile);
+    const currentPauseScreen = {
+      ...DEFAULT_PAUSE_SCREEN,
+      ...(settings.pauseScreen || {}),
+    };
+
+    settings.pauseScreen = {
+      ...currentPauseScreen,
+      mode,
+      ...(mode === 'default' ? { mediaType: null, mediaFile: null } : {}),
+    };
+
+    await writeJson(settingsFile, settings);
+    res.json(await buildSettingsResponse());
+  } catch (error) { next(error); }
+});
+
+app.post('/settings/pause-screen/upload', upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'file is required' });
+    const mediaType = mediaTypeFromName(req.file.originalname, req.file.mimetype);
+    if (!['image', 'video'].includes(mediaType)) {
+      return res.status(400).json({ error: 'file must be image or video' });
+    }
+
+    const existingFiles = await fs.readdir(pauseScreenDir);
+    await Promise.all(existingFiles.map((file) => fs.rm(path.join(pauseScreenDir, file), { force: true })));
+
+    const ext = path.extname(req.file.originalname || req.file.filename).toLowerCase() || '.bin';
+    const finalName = `pause-screen-${Date.now()}${ext}`;
+    const inputPath = path.join(incomingDir, req.file.filename);
+    const finalPath = path.join(pauseScreenDir, finalName);
+    await fs.rename(inputPath, finalPath);
+
+    const settings = await readJson(settingsFile);
+    settings.pauseScreen = {
+      mode: 'custom',
+      mediaType,
+      mediaFile: `/media/pause-screen/${finalName}`,
+    };
+    await writeJson(settingsFile, settings);
+
+    res.status(201).json(await buildSettingsResponse());
+  } catch (error) { next(error); }
 });
 
 
