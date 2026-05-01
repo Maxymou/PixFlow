@@ -24,6 +24,8 @@ const toPauseMediaUrl = (file) => {
   return `${API_BASE}/media/${file}`;
 };
 
+const samePauseScreen = (a, b) => JSON.stringify(a || null) === JSON.stringify(b || null);
+
 export function PlayerView() {
   const [playlist, setPlaylist] = useState([]);
   const [index, setIndex] = useState(0);
@@ -185,7 +187,10 @@ export function PlayerView() {
     try {
       const settings = await api('/api/settings');
       const nextPauseScreen = settings?.pauseScreen || null;
-      setPauseScreen(nextPauseScreen);
+      setPauseScreen((current) => {
+        if (samePauseScreen(current, nextPauseScreen)) return current;
+        return nextPauseScreen;
+      });
     } catch {
       // Best effort only: keep the previous pause screen config.
     }
