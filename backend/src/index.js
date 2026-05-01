@@ -59,6 +59,9 @@ let latestKioskStatus = null;
 const KIOSK_HEARTBEAT_TIMEOUT_MS = 15_000;
 const ALLOWED_KIOSK_STATES = new Set(['playing', 'paused', 'stopped', 'loading', 'idle', 'error', 'no_active_project']);
 const ALLOWED_KIOSK_COMMANDS = new Set(['pause', 'play', 'stop']);
+const ALLOWED_DEBUG_ACTIONS = new Set(['update', 'restart-kiosk']);
+const DEBUG_COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
+const DEBUG_OUTPUT_MAX_LENGTH = 8000;
 let latestKioskCommand = {
   id: 0,
   command: 'play',
@@ -475,6 +478,64 @@ const runCommand = (command, args = []) => new Promise((resolve, reject) => {
     reject(new Error(`${command} ${args.join(' ')} failed with code ${code}: ${stderr || stdout}`));
   });
 });
+
+const trimCommandOutput = (value) => {
+  if (typeof value !== 'string') return '';
+  if (value.length <= DEBUG_OUTPUT_MAX_LENGTH) return value;
+  return `${value.slice(0, DEBUG_OUTPUT_MAX_LENGTH)}\n...[truncated]`;
+};
+
+const runCommandWithTimeout = (command, args = [], { timeoutMs = DEBUG_COMMAND_TIMEOUT_MS } = {}) => new Promise((resolve, reject) => {
+  const child = spawn(command, args);
+  let stdout = '';
+  let stderr = '';
+  let didTimeout = false;
+  const timer = setTimeout(() => {
+    didTimeout = true;
+    child.kill('SIGTERM');
+  }, timeoutMs);
+
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk.toString();
+  });
+
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+
+  child.on('error', (error) => {
+    clearTimeout(timer);
+    reject(error);
+  });
+
+  child.on('close', (code) => {
+    clearTimeout(timer);
+    const trimmedStdout = trimCommandOutput(stdout);
+    const trimmedStderr = trimCommandOutput(stderr);
+
+    if (didTimeout) {
+      return reject(new Error(`Command timed out after ${timeoutMs}ms`));
+    }
+
+    if (code === 0) {
+      return resolve({ stdout: trimmedStdout, stderr: trimmedStderr });
+    }
+
+    return reject(new Error(`${command} ${args.join(' ')} failed with code ${code}: ${trimmedStderr || trimmedStdout}`));
+  });
+});
+
+const runDebugAction = async (action) => {
+  if (action === 'update') {
+    return runCommandWithTimeout('bash', ['-lc', 'cd /home/maxymou/PixFlow && ./update.sh']);
+  }
+
+  if (action === 'restart-kiosk') {
+    return runCommandWithTimeout('sudo', ['systemctl', 'restart', 'pixflow-kiosk']);
+  }
+
+  throw new Error('Action debug non autorisée');
+};
 
 const hasCommand = async (command) => {
   try {
@@ -1149,6 +1210,39 @@ app.patch('/settings/pause-screen', updatePauseScreenMode);
 app.patch('/api/settings/pause-screen', updatePauseScreenMode);
 app.post('/settings/pause-screen/upload', upload.single('file'), uploadPauseScreenMedia);
 app.post('/api/settings/pause-screen/upload', upload.single('file'), uploadPauseScreenMedia);
+
+app.post('/api/debug/action', async (req, res) => {
+  const action = typeof req.body?.action === 'string' ? req.body.action.trim() : '';
+  if (!ALLOWED_DEBUG_ACTIONS.has(action)) {
+    return res.status(400).json({
+      ok: false,
+      action,
+      error: 'Action debug non autorisée',
+    });
+  }
+
+  try {
+    const result = await runDebugAction(action);
+    const message = action === 'update'
+      ? 'Mise à jour lancée. Le serveur peut être temporairement indisponible.'
+      : 'Commande exécutée.';
+
+    return res.json({
+      ok: true,
+      action,
+      message,
+      stdout: result.stdout || '',
+      stderr: result.stderr || '',
+    });
+  } catch (error) {
+    console.error(`[PixFlow] Debug action failed (${action}):`, error);
+    return res.status(500).json({
+      ok: false,
+      action,
+      error: error.message || 'Commande debug en échec',
+    });
+  }
+});
 
 
 app.use((error, _req, res, _next) => {
