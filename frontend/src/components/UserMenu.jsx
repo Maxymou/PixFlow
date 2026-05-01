@@ -53,6 +53,22 @@ function uploadPauseScreenFile(file, onProgress) {
   });
 }
 
+function MetricBar({ label, value }) {
+  const number = Number(value);
+  const safeValue = Number.isFinite(number) ? Math.max(0, Math.min(100, Math.round(number))) : null;
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-xs">
+        <span className="text-slate-300">{label}</span>
+        <span className="text-slate-400">{safeValue === null ? '—' : `${safeValue}%`}</span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
+        <div className="h-full rounded-full bg-indigo-500 transition-all" style={{ width: `${safeValue ?? 0}%` }} />
+      </div>
+    </div>
+  );
+}
+
 export function UserMenu({ open, onClose }) {
   const [activePanel, setActivePanel] = useState('main');
   const [form, setForm] = useState(INITIAL_FORM);
@@ -82,6 +98,11 @@ export function UserMenu({ open, onClose }) {
   const [editingCommandId, setEditingCommandId] = useState('');
   const [editingCommandValue, setEditingCommandValue] = useState('');
   const [isDebugSaving, setIsDebugSaving] = useState(false);
+  const [debugNetwork, setDebugNetwork] = useState(null);
+  const [debugSystem, setDebugSystem] = useState(null);
+  const [debugNetworkError, setDebugNetworkError] = useState('');
+  const [debugSystemError, setDebugSystemError] = useState('');
+  const [copyStatus, setCopyStatus] = useState('');
 
   useEffect(() => {
     if (!open) {
@@ -91,6 +112,50 @@ export function UserMenu({ open, onClose }) {
 
     setActivePanel('main');
   }, [open]);
+
+  useEffect(() => {
+    if (!open || activePanel !== 'debug') return undefined;
+    let cancelled = false;
+    let intervalId = null;
+
+    const loadNetwork = async () => {
+      try {
+        const payload = await api('/api/debug/network');
+        if (!cancelled) {
+          setDebugNetwork(payload || null);
+          setDebugNetworkError('');
+        }
+      } catch {
+        if (!cancelled) {
+          setDebugNetwork(null);
+          setDebugNetworkError('IP SSH indisponible');
+        }
+      }
+    };
+
+    const loadSystem = async () => {
+      try {
+        const payload = await api('/api/debug/system');
+        if (!cancelled) {
+          setDebugSystem(payload || null);
+          setDebugSystemError('');
+        }
+      } catch {
+        if (!cancelled) {
+          setDebugSystem(null);
+          setDebugSystemError('Stats Raspberry indisponibles');
+        }
+      }
+    };
+
+    loadNetwork();
+    loadSystem();
+    intervalId = setInterval(loadSystem, 5000);
+    return () => {
+      cancelled = true;
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [open, activePanel]);
 
   useEffect(() => {
     if (!open) return;
@@ -533,6 +598,21 @@ export function UserMenu({ open, onClose }) {
 
     return 'Aucun fichier sélectionné';
   })();
+  const otherIps = (debugNetwork?.ips || []).map((item) => `${item.interface} ${item.address}`).join(' · ');
+
+  const handleCopySsh = async () => {
+    if (!debugNetwork?.sshCommand) return;
+    if (!navigator?.clipboard?.writeText) {
+      setCopyStatus('Copie impossible');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(debugNetwork.sshCommand);
+      setCopyStatus('Copié');
+    } catch {
+      setCopyStatus('Copie impossible');
+    }
+  };
 
 
   if (!open) return null;
@@ -746,6 +826,29 @@ export function UserMenu({ open, onClose }) {
                 <p className="text-sm text-slate-400">Commandes système Raspberry</p>
               </div>
               <div className="flex-1 space-y-4 overflow-y-auto px-4 py-5 md:px-6">
+                <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-slate-100">
+                  <p className="text-sm font-medium text-indigo-300">Connexion SSH</p>
+                  <p className="mt-2 text-sm">{debugNetwork?.sshCommand || debugNetworkError || 'IP SSH indisponible'}</p>
+                  {otherIps && <p className="mt-1 text-xs text-slate-400">Autres IP : {otherIps}</p>}
+                  <button type="button" onClick={handleCopySsh} className="mt-3 rounded-lg border border-slate-700 px-3 py-1 text-xs text-slate-100 disabled:opacity-50" disabled={!debugNetwork?.sshCommand}>Copier</button>
+                  {copyStatus && <p className="mt-1 text-xs text-slate-400">{copyStatus}</p>}
+                </div>
+
+                <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-slate-100">
+                  <p className="text-sm font-medium text-indigo-300">État du Raspberry Pi</p>
+                  {debugSystemError ? (
+                    <p className="mt-2 text-sm text-slate-400">{debugSystemError}</p>
+                  ) : (
+                    <div className="mt-3 space-y-3">
+                      <MetricBar label="CPU" value={debugSystem?.cpu?.percent} />
+                      <MetricBar label="RAM" value={debugSystem?.memory?.percent} />
+                      <MetricBar label="Disque" value={debugSystem?.disk?.percent} />
+                      <div className="flex items-center justify-between text-xs"><span className="text-slate-300">Temp.</span><span className="text-slate-400">{Number.isFinite(Number(debugSystem?.temperature?.celsius)) ? `${Math.round(Number(debugSystem?.temperature?.celsius))} °C` : '—'}</span></div>
+                      <div className="flex items-center justify-between text-xs"><span className="text-slate-300">Uptime</span><span className="text-slate-400">{debugSystem?.uptime?.label || '—'}</span></div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">Attention : ces commandes sont exécutées sur le Raspberry Pi. Une mauvaise commande peut bloquer PixFlow.</div>
 
                 {runningCommandId && (
