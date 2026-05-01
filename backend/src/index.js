@@ -1250,7 +1250,7 @@ app.post('/settings/pause-screen/upload', upload.single('file'), uploadPauseScre
 app.post('/api/settings/pause-screen/upload', upload.single('file'), uploadPauseScreenMedia);
 
 
-app.get('/api/debug/commands', async (_req, res, next) => {
+app.get(['/api/debug/commands', '/debug/commands'], async (_req, res, next) => {
   try {
     const settings = await readJson(settingsFile);
     const debugCommands = getDebugCommandsFromSettings(settings);
@@ -1264,7 +1264,7 @@ app.get('/api/debug/commands', async (_req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.patch('/api/debug/commands/:id', async (req, res) => {
+app.patch(['/api/debug/commands/:id', '/debug/commands/:id'], async (req, res) => {
   try {
     const id = typeof req.params?.id === 'string' ? req.params.id.trim() : '';
     const command = typeof req.body?.command === 'string' ? req.body.command.trim() : '';
@@ -1295,7 +1295,7 @@ app.patch('/api/debug/commands/:id', async (req, res) => {
   }
 });
 
-app.post('/api/debug/action', async (req, res) => {
+app.post(['/api/debug/action', '/debug/action'], async (req, res) => {
   const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
   if (!id) {
     return res.status(400).json({ ok: false, id, message: 'Identifiant de commande manquant.' });
