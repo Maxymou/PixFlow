@@ -851,7 +851,7 @@ export function UserMenu({ open, onClose }) {
                 <h2 className="text-lg font-semibold text-slate-100">Débug</h2>
                 <p className="text-sm text-slate-400">Commandes système Raspberry</p>
               </div>
-              <div className="flex-1 space-y-4 overflow-y-auto px-4 py-5 md:px-6">
+              <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5 pb-8 md:px-6">
                 <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-slate-100">
                   <p className="text-sm font-medium text-indigo-300">Connexion SSH</p>
                   <p className="mt-2 text-sm">{debugNetwork?.sshCommand || debugNetworkError || 'IP SSH indisponible'}</p>
