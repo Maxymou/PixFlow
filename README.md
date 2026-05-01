@@ -79,6 +79,9 @@ cd /home/maxymou/PixFlow
 ## Commandes debug depuis l’interface
 
 Le menu **Débug** affiche les boutons système (ex: *Mettre à jour PixFlow*, *Relancer le kiosk*) et montre la commande shell exécutée sous chaque bouton.
+Le menu Débug affiche :
+- la commande SSH pour se connecter au Raspberry ;
+- les stats système du Raspberry : CPU, RAM, disque, température et uptime.
 
 Les commandes sont modifiables directement depuis l’interface via **Modifier** → **Enregistrer**. Elles sont persistées dans `/data/settings.json` sous `debugCommands`.
 

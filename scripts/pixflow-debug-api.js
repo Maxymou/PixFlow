@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import http from 'http';
 import { spawn } from 'child_process';
+import { execFile } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 
 const HOST = process.env.DEBUG_HOST_API_BIND || '127.0.0.1';
 const PORT = Number(process.env.DEBUG_HOST_API_PORT || 4877);
@@ -11,6 +13,7 @@ const DEBUG_OUTPUT_MAX_LENGTH = 8000;
 const DEBUG_COMMAND_MAX_LENGTH = 500;
 const COMMANDS_FILE = process.env.DEBUG_COMMANDS_FILE || '/home/maxymou/PixFlow/data/debug-commands.json';
 const PROJECT_DIR = process.env.PIXFLOW_PROJECT_DIR || '/home/maxymou/PixFlow';
+const PIXFLOW_SSH_USER = process.env.PIXFLOW_SSH_USER || 'maxymou';
 
 const DEFAULT_COMMANDS = [
   { id: 'update', label: 'Mettre à jour PixFlow', command: 'cd /home/maxymou/PixFlow && ./update.sh' },
@@ -114,6 +117,124 @@ const runShellCommand = async (command, shellPath) => new Promise((resolve, reje
   });
 });
 
+const isPrivateIpv4 = (ip) => /^10\./.test(ip) || /^192\.168\./.test(ip) || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ip);
+
+const getNetworkInfo = () => {
+  const hostname = os.hostname();
+  const network = os.networkInterfaces();
+  const ips = [];
+
+  for (const [name, entries] of Object.entries(network)) {
+    for (const entry of entries || []) {
+      if (!entry || entry.family !== 'IPv4' || entry.internal || entry.address === '127.0.0.1') continue;
+      ips.push({ interface: name, address: entry.address, family: 'IPv4' });
+    }
+  }
+
+  const lanEth = ips.find((item) => (item.interface === 'eth0' || item.interface.startsWith('en')) && isPrivateIpv4(item.address));
+  const lanWifi = ips.find((item) => (item.interface === 'wlan0' || item.interface.startsWith('wl')) && isPrivateIpv4(item.address));
+  const primaryIp = lanEth?.address || lanWifi?.address || ips[0]?.address || null;
+
+  return {
+    hostname,
+    sshUser: PIXFLOW_SSH_USER,
+    primaryIp,
+    sshCommand: primaryIp ? `ssh ${PIXFLOW_SSH_USER}@${primaryIp}` : null,
+    ips,
+  };
+};
+
+const readCpuUsagePercent = async () => {
+  const sample = () => os.cpus().reduce((acc, cpu) => {
+    const times = cpu.times || {};
+    const total = Object.values(times).reduce((sum, value) => sum + value, 0);
+    return { idle: acc.idle + (times.idle || 0), total: acc.total + total };
+  }, { idle: 0, total: 0 });
+  const start = sample();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const end = sample();
+  const idleDelta = end.idle - start.idle;
+  const totalDelta = end.total - start.total;
+  if (!Number.isFinite(totalDelta) || totalDelta <= 0) return null;
+  return Math.round(((totalDelta - idleDelta) / totalDelta) * 100);
+};
+
+const readDiskStats = async () => new Promise((resolve) => {
+  execFile('df', ['-k', '/'], (error, stdout) => {
+    if (error || !stdout) {
+      resolve({ percent: null, usedGb: null, totalGb: null, mount: '/' });
+      return;
+    }
+    const lines = stdout.trim().split('\n');
+    const row = lines[1] || '';
+    const parts = row.trim().split(/\s+/);
+    const totalKb = Number(parts[1]);
+    const usedKb = Number(parts[2]);
+    const percent = Number((parts[4] || '').replace('%', ''));
+    resolve({
+      percent: Number.isFinite(percent) ? percent : null,
+      usedGb: Number.isFinite(usedKb) ? Math.round((usedKb / (1024 * 1024)) * 10) / 10 : null,
+      totalGb: Number.isFinite(totalKb) ? Math.round((totalKb / (1024 * 1024)) * 10) / 10 : null,
+      mount: parts[5] || '/',
+    });
+  });
+});
+
+const readTemperature = async () => {
+  try {
+    const raw = await fs.readFile('/sys/class/thermal/thermal_zone0/temp', 'utf8');
+    const value = Number(raw.trim());
+    if (Number.isFinite(value)) return { celsius: Math.round((value >= 1000 ? value / 1000 : value)) };
+  } catch {
+    // continue
+  }
+  const fromVcgencmd = await new Promise((resolve) => {
+    execFile('vcgencmd', ['measure_temp'], (error, stdout) => {
+      if (error || !stdout) return resolve(null);
+      const match = stdout.match(/temp=([0-9.]+)/);
+      return resolve(match ? Number(match[1]) : null);
+    });
+  });
+  return { celsius: Number.isFinite(fromVcgencmd) ? Math.round(fromVcgencmd) : null };
+};
+
+const formatUptimeFr = (seconds) => {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const parts = [];
+  if (days > 0) parts.push(`${days}j`);
+  if (hours > 0 || days > 0) parts.push(`${hours}h`);
+  parts.push(`${minutes}m`);
+  return parts.join(' ');
+};
+
+const getSystemInfo = async () => {
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  const usedMem = totalMem - freeMem;
+  const disk = await readDiskStats();
+  const cpuPercent = await readCpuUsagePercent();
+  const temperature = await readTemperature();
+  const uptimeSeconds = Math.floor(os.uptime());
+
+  return {
+    cpu: { percent: cpuPercent },
+    memory: {
+      percent: totalMem > 0 ? Math.round((usedMem / totalMem) * 100) : null,
+      usedMb: Math.round(usedMem / (1024 * 1024)),
+      totalMb: Math.round(totalMem / (1024 * 1024)),
+    },
+    disk,
+    temperature,
+    uptime: {
+      seconds: uptimeSeconds,
+      label: formatUptimeFr(uptimeSeconds),
+    },
+  };
+};
+
 const main = async () => {
   const shellPath = await detectShell();
 
@@ -123,6 +244,12 @@ const main = async () => {
 
       if (req.method === 'GET' && url.pathname === '/commands') {
         return sendJson(res, 200, { commands: await readCommands() });
+      }
+      if (req.method === 'GET' && url.pathname === '/network') {
+        return sendJson(res, 200, getNetworkInfo());
+      }
+      if (req.method === 'GET' && url.pathname === '/system') {
+        return sendJson(res, 200, await getSystemInfo());
       }
 
       if (req.method === 'PATCH' && url.pathname.startsWith('/commands/')) {

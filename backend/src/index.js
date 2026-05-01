@@ -601,7 +601,7 @@ async function callDebugHostApi(routePath, options = {}) {
     unavailableError.payload = {
       ok: false,
       error: 'pixflow-debug-api indisponible',
-      message: 'Impossible de contacter le service Débug côté Raspberry sur le port 4877.',
+      message: 'Impossible de contacter le service Débug côté Raspberry.',
       details: error.message,
     };
     throw unavailableError;
@@ -1371,6 +1371,32 @@ app.get(['/api/debug/commands', '/debug/commands'], async (_req, res, next) => {
       return res.status(error.status || 503).json(error.payload);
     }
     return next(error);
+  }
+});
+
+app.get(['/api/debug/network', '/debug/network'], async (_req, res) => {
+  try {
+    const payload = await callDebugHostApi('/network');
+    return res.json(payload || {});
+  } catch (error) {
+    return res.status(error.status || 503).json(error.payload || {
+      ok: false,
+      error: 'pixflow-debug-api indisponible',
+      message: 'Impossible de contacter le service Débug côté Raspberry.',
+    });
+  }
+});
+
+app.get(['/api/debug/system', '/debug/system'], async (_req, res) => {
+  try {
+    const payload = await callDebugHostApi('/system');
+    return res.json(payload || {});
+  } catch (error) {
+    return res.status(error.status || 503).json(error.payload || {
+      ok: false,
+      error: 'pixflow-debug-api indisponible',
+      message: 'Impossible de contacter le service Débug côté Raspberry.',
+    });
   }
 });
 
