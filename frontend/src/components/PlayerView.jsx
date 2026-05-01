@@ -226,6 +226,7 @@ export function PlayerView() {
       const video = document.createElement('video');
       video.preload = 'auto';
       video.muted = true;
+      video.defaultMuted = true;
       video.playsInline = true;
       video.src = pauseMediaUrl;
 
@@ -236,22 +237,6 @@ export function PlayerView() {
 
       video.load();
       console.log('[PixFlow kiosk] Pause screen video preload started');
-
-      const playPromise = video.play();
-      if (playPromise?.then) {
-        playPromise
-          .then(() => {
-            video.pause();
-            try {
-              video.currentTime = 0;
-            } catch {
-              // Ignore seek errors.
-            }
-          })
-          .catch((error) => {
-            console.warn('[PixFlow kiosk] Pause screen video preload failed:', error);
-          });
-      }
 
       const previousVideo = pausePreloadVideoRef.current;
       pausePreloadVideoRef.current = video;
