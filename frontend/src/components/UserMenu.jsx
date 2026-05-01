@@ -520,6 +520,19 @@ export function UserMenu({ open, onClose }) {
         method: 'POST',
         body: JSON.stringify({ id: commandItem.id }),
       });
+      if (commandItem.id === 'update' && result?.background) {
+        const infoPayload = {
+          type: 'success',
+          id: commandItem.id,
+          message: result?.message || 'Mise à jour lancée. Le serveur peut être temporairement indisponible.',
+          stdout: '',
+          stderr: '',
+        };
+        setDebugStatus(infoPayload);
+        setDebugResult(infoPayload);
+        setDebugError('');
+        return;
+      }
       const statusPayload = {
         type: result?.ok ? 'success' : 'error',
         id: commandItem.id,
@@ -534,6 +547,19 @@ export function UserMenu({ open, onClose }) {
       }
     } catch (error) {
       const parsedError = parseApiError(error);
+      if (commandItem.id === 'update' && (parsedError.includes('502 Bad Gateway') || parsedError === OFFLINE_ERROR)) {
+        const infoPayload = {
+          type: 'success',
+          id: commandItem.id,
+          message: 'Mise à jour lancée. La connexion au serveur peut avoir été interrompue pendant le redémarrage. Rafraîchissez la page dans quelques instants.',
+          stdout: '',
+          stderr: '',
+        };
+        setDebugStatus(infoPayload);
+        setDebugResult(infoPayload);
+        setDebugError('');
+        return;
+      }
       const errorPayload = { type: 'error', id: commandItem.id, message: 'Erreur pendant l’exécution de la commande.', stdout: '', stderr: parsedError };
       setDebugStatus(errorPayload);
       setDebugResult(errorPayload);
