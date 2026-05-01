@@ -8,6 +8,7 @@ const VIDEO_START_TIMEOUT_MS = 60_000;
 const VIDEO_MAX_RECOVERIES = 2;
 const KIOSK_HEARTBEAT_INTERVAL_MS = 5_000;
 const KIOSK_COMMAND_POLL_INTERVAL_MS = 1_000;
+const SETTINGS_REFRESH_MS = 15_000;
 
 const toMediaUrl = (item) => {
   if (!item?.file) return null;
@@ -32,6 +33,8 @@ export function PlayerView() {
   const videoRecoveryAttemptsRef = useRef(0);
   const videoBufferingTimeoutRef = useRef(null);
   const videoLoadingOverlayTimeoutRef = useRef(null);
+  const pausePreloadVideoRef = useRef(null);
+  const pausePreloadImageRef = useRef(null);
   const lastAppliedCommandIdRef = useRef(0);
   const heartbeatPayloadRef = useRef({
     status: 'idle',
@@ -171,47 +174,96 @@ export function PlayerView() {
     }
   }, [clearRetry]);
 
-  useEffect(() => {
-    let mounted = true;
-    const loadPauseScreen = async () => {
-      try {
-        const settings = await api('/api/settings');
-        if (!mounted) return;
-        const nextPauseScreen = settings?.pauseScreen || null;
-        setPauseScreen(nextPauseScreen);
-      } catch {
-        setPauseScreen(null);
-      }
-    };
-    loadPauseScreen();
-    return () => { mounted = false; };
+  const loadPauseScreenSettings = useCallback(async () => {
+    try {
+      const settings = await api('/api/settings');
+      const nextPauseScreen = settings?.pauseScreen || null;
+      setPauseScreen(nextPauseScreen);
+    } catch {
+      // Best effort only: keep the previous pause screen config.
+    }
   }, []);
 
   useEffect(() => {
-    if (!pauseScreen || pauseScreen.mode !== 'custom' || !pauseScreen.mediaFile) return undefined;
+    loadPauseScreenSettings();
+    const id = setInterval(loadPauseScreenSettings, SETTINGS_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [loadPauseScreenSettings]);
+
+  useEffect(() => {
+    if (!pauseScreen || pauseScreen.mode !== 'custom') return undefined;
+    if (pauseScreen.status && pauseScreen.status !== 'ready') return undefined;
+    if (!pauseScreen.mediaFile) return undefined;
 
     if (pauseScreen.mediaType === 'image') {
       const img = new Image();
       img.src = pauseScreen.mediaFile;
+      pausePreloadImageRef.current = img;
+      if (pausePreloadVideoRef.current) {
+        pausePreloadVideoRef.current.pause();
+        pausePreloadVideoRef.current.removeAttribute('src');
+        pausePreloadVideoRef.current.load();
+        pausePreloadVideoRef.current = null;
+      }
       return undefined;
     }
 
     if (pauseScreen.mediaType === 'video') {
-      const preloadVideo = document.createElement('video');
-      preloadVideo.preload = 'auto';
-      preloadVideo.muted = true;
-      preloadVideo.playsInline = true;
-      preloadVideo.src = pauseScreen.mediaFile;
-      preloadVideo.load();
+      console.log('[PixFlow kiosk] Preloading pause screen video:', pauseScreen.mediaFile);
+      if (pausePreloadImageRef.current) {
+        pausePreloadImageRef.current = null;
+      }
+
+      const video = document.createElement('video');
+      video.preload = 'auto';
+      video.muted = true;
+      video.playsInline = true;
+      video.src = pauseScreen.mediaFile;
+
+      video.onloadeddata = () => console.log('[PixFlow kiosk] Pause screen video loadeddata');
+      video.oncanplay = () => console.log('[PixFlow kiosk] Pause screen video canplay');
+      video.oncanplaythrough = () => console.log('[PixFlow kiosk] Pause screen video canplaythrough');
+      video.onerror = () => console.warn('[PixFlow kiosk] Pause screen video preload error');
+
+      video.load();
+      console.log('[PixFlow kiosk] Pause screen video preload started');
+
+      const playPromise = video.play();
+      if (playPromise?.then) {
+        playPromise
+          .then(() => {
+            video.pause();
+            try {
+              video.currentTime = 0;
+            } catch {
+              // Ignore seek errors.
+            }
+          })
+          .catch((error) => {
+            console.warn('[PixFlow kiosk] Pause screen video preload failed:', error);
+          });
+      }
+
+      const previousVideo = pausePreloadVideoRef.current;
+      pausePreloadVideoRef.current = video;
+      if (previousVideo && previousVideo !== video) {
+        previousVideo.pause();
+        previousVideo.removeAttribute('src');
+        previousVideo.load();
+      }
 
       return () => {
-        preloadVideo.removeAttribute('src');
-        preloadVideo.load();
+        if (pausePreloadVideoRef.current === video) {
+          video.pause();
+          video.removeAttribute('src');
+          video.load();
+          pausePreloadVideoRef.current = null;
+        }
       };
     }
 
     return undefined;
-  }, [pauseScreen]);
+  }, [pauseScreen?.mode, pauseScreen?.mediaType, pauseScreen?.mediaFile, pauseScreen?.status]);
 
   useEffect(() => {
     loadPlaylist();
