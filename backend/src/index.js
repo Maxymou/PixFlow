@@ -46,7 +46,6 @@ const hotspotHelperPath = process.env.HOTSPOT_HELPER_PATH || '/usr/local/bin/pix
 const hotspotHostApiUrl = process.env.HOTSPOT_HOST_API_URL || '';
 let hotspotEnabledRuntime = true;
 let latestKioskStatus = null;
-let latestKioskPreview = null;
 const KIOSK_HEARTBEAT_TIMEOUT_MS = 15_000;
 const ALLOWED_KIOSK_STATES = new Set(['playing', 'paused', 'stopped', 'loading', 'idle', 'error', 'no_active_project']);
 const ALLOWED_KIOSK_COMMANDS = new Set(['pause', 'play', 'stop']);
@@ -55,11 +54,9 @@ let latestKioskCommand = {
   command: 'play',
   createdAt: new Date().toISOString(),
 };
-const KIOSK_PREVIEW_MAX_BODY_BYTES = Number(process.env.KIOSK_PREVIEW_MAX_BODY_BYTES || (2 * 1024 * 1024));
-const KIOSK_PREVIEW_ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 app.use(cors());
-app.use(express.json({ limit: `${Math.max(2, Math.ceil(KIOSK_PREVIEW_MAX_BODY_BYTES / (1024 * 1024)))}mb` }));
+app.use(express.json({ limit: '2mb' }));
 app.use('/media', express.static(mediaDir, {
   maxAge: '7d',
   immutable: true,
@@ -217,19 +214,6 @@ const normalizeKioskStatus = (value) => {
   if (!normalized) return 'idle';
   return ALLOWED_KIOSK_STATES.has(normalized) ? normalized : 'idle';
 };
-const KIOSK_PREVIEW_DATA_URL_REGEX = /^data:(image\/(?:jpeg|png|webp));base64,([a-zA-Z0-9+/=\s]+)$/;
-const parseKioskPreviewDataUrl = (value) => {
-  if (typeof value !== 'string') return null;
-  const match = value.trim().match(KIOSK_PREVIEW_DATA_URL_REGEX);
-  if (!match) return null;
-  const mimeType = match[1].toLowerCase();
-  const base64Payload = match[2].replace(/\s/g, '');
-  if (!KIOSK_PREVIEW_ALLOWED_MIME_TYPES.has(mimeType) || !base64Payload) return null;
-  const buffer = Buffer.from(base64Payload, 'base64');
-  if (!buffer.length || buffer.length > KIOSK_PREVIEW_MAX_BODY_BYTES) return null;
-  return { mimeType, size: buffer.length };
-};
-
 const buildKioskStatusResponse = () => {
   if (!latestKioskStatus) {
     return {
@@ -847,37 +831,6 @@ app.post('/kiosk/command', (req, res) => {
 
 app.get('/kiosk/command', (_req, res) => {
   res.json(latestKioskCommand);
-});
-
-app.post('/kiosk/preview', express.json({ limit: KIOSK_PREVIEW_MAX_BODY_BYTES }), (req, res) => {
-  const { imageDataUrl, mediaId, mediaName, mediaType, status } = req.body || {};
-  const parsedPreview = parseKioskPreviewDataUrl(imageDataUrl);
-  if (!parsedPreview) {
-    return res.status(400).json({ error: 'invalid preview payload' });
-  }
-
-  latestKioskPreview = {
-    imageDataUrl,
-    mediaId: cleanKioskValue(mediaId),
-    mediaName: cleanKioskValue(mediaName),
-    mediaType: cleanKioskValue(mediaType),
-    status: normalizeKioskStatus(status),
-    capturedAt: new Date().toISOString(),
-  };
-
-  return res.json({ ok: true });
-});
-
-app.get('/kiosk/preview', (_req, res) => {
-  if (!latestKioskPreview) {
-    res.json({ available: false, message: 'No preview available' });
-    return;
-  }
-
-  res.json({
-    available: true,
-    ...latestKioskPreview,
-  });
 });
 
 app.get('/settings', async (_req, res, next) => {
