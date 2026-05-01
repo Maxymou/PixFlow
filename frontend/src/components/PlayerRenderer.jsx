@@ -92,7 +92,11 @@ export function PlayerRenderer({
 }
 
 function StoppedScreen({ mode, pauseScreen }) {
-  if (pauseScreen?.mode === 'custom' && pauseScreen?.mediaFile) {
+  const isPauseMediaReady = pauseScreen?.mode === 'custom'
+    && pauseScreen?.status !== 'processing'
+    && pauseScreen?.status !== 'failed'
+    && Boolean(pauseScreen?.mediaFile);
+  if (isPauseMediaReady) {
     const mediaClass = mode === 'preview' ? 'h-full w-full object-contain' : 'max-h-full max-w-full object-contain';
     if (pauseScreen.mediaType === 'video') {
       return (

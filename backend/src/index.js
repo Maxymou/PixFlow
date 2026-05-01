@@ -22,6 +22,10 @@ const DEFAULT_PAUSE_SCREEN = {
   mode: 'default',
   mediaType: null,
   mediaFile: null,
+  status: 'ready',
+  progress: 100,
+  originalName: null,
+  error: null,
 };
 
 const DEFAULT_MAX_UPLOAD_SIZE_BYTES = 500 * 1024 * 1024;
@@ -142,6 +146,19 @@ const clearPauseScreenFiles = async () => {
     const files = await fs.readdir(pauseScreenDir);
     await Promise.all(
       files.map((file) => fs.rm(path.join(pauseScreenDir, file), { force: true }))
+    );
+  } catch (error) {
+    console.warn('[PixFlow] Failed to clear pause screen files:', error.message);
+  }
+};
+
+const clearPauseScreenFilesExcept = async (keepFileName) => {
+  try {
+    const files = await fs.readdir(pauseScreenDir);
+    await Promise.all(
+      files
+        .filter((file) => file !== keepFileName)
+        .map((file) => fs.rm(path.join(pauseScreenDir, file), { force: true }))
     );
   } catch (error) {
     console.warn('[PixFlow] Failed to clear pause screen files:', error.message);
@@ -327,6 +344,79 @@ const processVideoInBackground = async (mediaId, inputPath, outputPath, finalNam
     });
     await buildPlaylist();
     throw error;
+  }
+};
+
+const processPauseScreenVideoInBackground = async (inputPath, outputPath, finalName, originalName) => {
+  let durationSeconds = null;
+  try {
+    durationSeconds = await ffprobeDuration(inputPath);
+  } catch (error) {
+    console.warn('[PixFlow] Pause screen ffprobe failed, progress will be approximate:', error.message);
+  }
+
+  let lastStoredProgress = 0;
+  let lastStoredAt = 0;
+  const storeProgress = async (progress) => {
+    const bounded = Math.min(99, Math.max(0, Number(progress) || 0));
+    const now = Date.now();
+    if (bounded <= lastStoredProgress && now - lastStoredAt < 1_500) return;
+    lastStoredProgress = bounded;
+    lastStoredAt = now;
+    const settings = await readJson(settingsFile);
+    settings.pauseScreen = {
+      mode: 'custom',
+      mediaType: 'video',
+      mediaFile: null,
+      status: 'processing',
+      progress: bounded,
+      originalName,
+      error: null,
+    };
+    await writeJson(settingsFile, settings);
+  };
+
+  try {
+    await runFfmpeg(inputPath, outputPath, {
+      onProgress: (line) => {
+        const match = line.match(/time=(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/);
+        if (!match || !durationSeconds) return;
+        const current = toHmsSeconds(match[1]);
+        const percent = Math.round((current / durationSeconds) * 100);
+        storeProgress(percent).catch((error) => {
+          console.warn('[PixFlow] Failed to persist pause screen progress:', error.message);
+        });
+      },
+    });
+
+    await clearPauseScreenFilesExcept(finalName);
+    const settings = await readJson(settingsFile);
+    settings.pauseScreen = {
+      mode: 'custom',
+      mediaType: 'video',
+      mediaFile: `/media/pause-screen/${finalName}`,
+      status: 'ready',
+      progress: 100,
+      originalName,
+      error: null,
+    };
+    await writeJson(settingsFile, settings);
+  } catch (error) {
+    await fs.rm(outputPath, { force: true }).catch(() => {});
+    const settings = await readJson(settingsFile);
+    settings.pauseScreen = {
+      mode: 'custom',
+      mediaType: 'video',
+      mediaFile: null,
+      status: 'failed',
+      progress: 0,
+      originalName,
+      error: error.message,
+    };
+    await writeJson(settingsFile, settings);
+    throw error;
+  } finally {
+    await fs.rm(inputPath, { force: true }).catch(() => {});
   }
 };
 
@@ -966,7 +1056,7 @@ const updatePauseScreenMode = async (req, res, next) => {
       ...(settings.pauseScreen || {}),
     };
 
-    if (mode === 'custom' && (!currentPauseScreen.mediaType || !currentPauseScreen.mediaFile)) {
+    if (mode === 'custom' && (!currentPauseScreen.mediaType || !currentPauseScreen.mediaFile || currentPauseScreen.status !== 'ready')) {
       return res.status(400).json({ error: 'A custom pause screen requires an uploaded image or video' });
     }
 
@@ -978,6 +1068,10 @@ const updatePauseScreenMode = async (req, res, next) => {
         mode: 'custom',
         mediaType: currentPauseScreen.mediaType,
         mediaFile: currentPauseScreen.mediaFile,
+        status: 'ready',
+        progress: 100,
+        originalName: currentPauseScreen.originalName || null,
+        error: null,
       };
     }
 
@@ -999,13 +1093,27 @@ const uploadPauseScreenMedia = async (req, res, next) => {
     inputPath = path.join(incomingDir, req.file.filename);
     let finalName;
 
+    const originalName = path.basename(req.file.originalname || '');
+
     if (mediaType === 'video') {
       finalName = `pause-screen-${nanoid()}.mp4`;
       const outputPath = path.join(pauseScreenDir, finalName);
-      await clearPauseScreenFiles();
-      await runFfmpeg(inputPath, outputPath);
-      await fs.rm(inputPath, { force: true });
+      const settings = await readJson(settingsFile);
+      settings.pauseScreen = {
+        mode: 'custom',
+        mediaType: 'video',
+        mediaFile: null,
+        status: 'processing',
+        progress: 0,
+        originalName,
+        error: null,
+      };
+      await writeJson(settingsFile, settings);
+      processPauseScreenVideoInBackground(inputPath, outputPath, finalName, originalName).catch((error) => {
+        console.error('[PixFlow] Pause screen video conversion failed:', error);
+      });
       inputPath = null;
+      return res.status(202).json(await buildSettingsResponse());
     } else {
       await clearPauseScreenFiles();
       const ext = path.extname(req.file.originalname || req.file.filename).toLowerCase();
@@ -1020,6 +1128,10 @@ const uploadPauseScreenMedia = async (req, res, next) => {
       mode: 'custom',
       mediaType,
       mediaFile: `/media/pause-screen/${finalName}`,
+      status: 'ready',
+      progress: 100,
+      originalName,
+      error: null,
     };
     await writeJson(settingsFile, settings);
 
