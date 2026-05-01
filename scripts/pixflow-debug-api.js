@@ -246,6 +246,220 @@ const getSystemInfo = async () => {
   };
 };
 
+const DATA_DIR = path.join(PROJECT_DIR, 'data');
+
+const checkService = (name) => new Promise((resolve) => {
+  execFile('systemctl', ['is-active', name], { timeout: 5000 }, (_err, stdout) => {
+    resolve((stdout || '').trim() || 'unknown');
+  });
+});
+
+const runDockerExecCat = (filePath) => new Promise((resolve) => {
+  execFile('docker', ['exec', 'pixflow-backend', 'cat', filePath], { timeout: 6000 }, (err, stdout) => {
+    if (err || !stdout) return resolve(null);
+    try {
+      resolve(JSON.parse(stdout));
+    } catch {
+      resolve(null);
+    }
+  });
+});
+
+const getPixflowStatus = async () => {
+  const [kioskState, hotspotState] = await Promise.all([
+    checkService('pixflow-kiosk').catch(() => 'unknown'),
+    checkService('pixflow-hotspot-api').catch(() => 'unknown'),
+  ]);
+
+  const kioskStatus = {
+    status: kioskState === 'active' ? 'active' : kioskState,
+    service: 'pixflow-kiosk',
+    message: kioskState === 'active' ? 'Kiosk actif' : `Kiosk ${kioskState}`,
+  };
+
+  const hotspotStatus = {
+    status: hotspotState === 'active' ? 'active' : hotspotState,
+    message: hotspotState === 'active' ? 'Hotspot actif' : `Hotspot ${hotspotState}`,
+  };
+
+  let dockerStatus = { status: 'unknown', containers: [] };
+  await new Promise((resolve) => {
+    execFile('docker', ['ps', '--format', '{{.Names}}|{{.Status}}'], { timeout: 8000 }, (err, stdout) => {
+      if (!err && stdout) {
+        const containers = stdout.trim().split('\n').filter(Boolean).map((line) => {
+          const sep = line.indexOf('|');
+          return { name: line.slice(0, sep).trim(), state: line.slice(sep + 1).trim() };
+        });
+        const px = containers.filter((c) => c.name.startsWith('pixflow'));
+        dockerStatus = {
+          status: px.length > 0 && px.every((c) => c.state.startsWith('Up')) ? 'active'
+            : px.length > 0 ? 'partial' : 'inactive',
+          containers: px,
+        };
+      }
+      resolve();
+    });
+  });
+
+  let gitInfo = { branch: null, commit: null, date: null };
+  await new Promise((resolve) => {
+    execFile('git', ['-C', PROJECT_DIR, 'log', '-1', '--format=%h %ci'], { timeout: 5000 }, (err, stdout) => {
+      if (!err && stdout) {
+        const parts = (stdout || '').trim().split(' ');
+        gitInfo.commit = parts[0] || null;
+        gitInfo.date = parts.slice(1, 3).join(' ') || null;
+      }
+      resolve();
+    });
+  });
+  await new Promise((resolve) => {
+    execFile('git', ['-C', PROJECT_DIR, 'rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 5000 }, (err, stdout) => {
+      if (!err && stdout) gitInfo.branch = (stdout || '').trim() || null;
+      resolve();
+    });
+  });
+
+  let activeProject = null;
+  const projects = await runDockerExecCat('/data/projects/projects.json').catch(() => null);
+  if (Array.isArray(projects)) {
+    const active = projects.find((p) => p.active);
+    if (active) {
+      activeProject = { id: active.id || null, name: active.name || null, mediaCount: 0 };
+      const media = await runDockerExecCat('/data/projects/media.json').catch(() => null);
+      if (Array.isArray(media)) {
+        activeProject.mediaCount = media.filter((m) => m.projectId === active.id && m.active !== false).length;
+      }
+    }
+  }
+
+  return {
+    backend: { status: 'online', message: 'Backend en ligne' },
+    frontend: { status: 'unknown', message: 'Statut non vérifié depuis le helper' },
+    kiosk: kioskStatus,
+    hotspot: hotspotStatus,
+    docker: dockerStatus,
+    git: gitInfo,
+    activeProject,
+  };
+};
+
+const LOG_COMMANDS = {
+  backend: ['docker', ['logs', '--tail=150', 'pixflow-backend']],
+  kiosk: ['journalctl', ['-u', 'pixflow-kiosk', '-n', '150', '--no-pager']],
+  hotspot: ['journalctl', ['-u', 'pixflow-hotspot-api', '-n', '150', '--no-pager']],
+  docker: ['docker', ['ps', '-a', '--format', 'table {{.Names}}\t{{.Status}}\t{{.Ports}}']],
+  system: ['journalctl', ['-n', '150', '--no-pager']],
+};
+
+const getLogs = (target) => new Promise((resolve) => {
+  const entry = LOG_COMMANDS[target];
+  if (!entry) return resolve({ ok: false, target, lines: [] });
+  const [cmd, args] = entry;
+  execFile(cmd, args, { timeout: 15000, maxBuffer: 1024 * 512 }, (err, stdout, stderr) => {
+    const raw = (stdout || stderr || (err ? err.message : '') || '').slice(-60000);
+    const lines = raw.split('\n').filter(Boolean).slice(-200);
+    resolve({ ok: true, target, lines: lines.length ? lines : ['Aucune sortie disponible'] });
+  });
+});
+
+const getStorageInfo = async () => {
+  const disk = await readDiskStats().catch(() => null);
+  let media = { imageCount: null, videoCount: null, totalCount: null };
+  const items = await runDockerExecCat('/data/projects/media.json').catch(() => null);
+  if (Array.isArray(items)) {
+    media.imageCount = items.filter((m) => m.type === 'image').length;
+    media.videoCount = items.filter((m) => m.type === 'video').length;
+    media.totalCount = items.length;
+    const failed = items.filter((m) => m.status === 'failed').length;
+    if (failed > 0) media.failedCount = failed;
+  }
+  return { disk, media };
+};
+
+const getDiagnostic = async () => {
+  const checks = [];
+
+  checks.push({ label: 'Backend', status: 'ok', message: 'Backend en ligne' });
+
+  const kioskState = await checkService('pixflow-kiosk').catch(() => 'unknown');
+  checks.push({
+    label: 'Kiosk',
+    status: kioskState === 'active' ? 'ok' : kioskState === 'unknown' ? 'unknown' : 'warning',
+    message: kioskState === 'active' ? 'Service kiosk actif' : `Service kiosk ${kioskState}`,
+  });
+
+  let dockerOk = false;
+  await new Promise((resolve) => {
+    execFile('docker', ['info', '--format', '{{.ServerVersion}}'], { timeout: 8000 }, (err, stdout) => {
+      dockerOk = !err && Boolean((stdout || '').trim());
+      resolve();
+    });
+  });
+  checks.push({ label: 'Docker', status: dockerOk ? 'ok' : 'error', message: dockerOk ? 'Docker actif' : 'Docker indisponible' });
+
+  for (const [label, name] of [['Container backend', 'pixflow-backend'], ['Container frontend', 'pixflow-frontend']]) {
+    let running = false;
+    await new Promise((resolve) => {
+      execFile('docker', ['inspect', '--format', '{{.State.Status}}', name], { timeout: 5000 }, (err, stdout) => {
+        running = !err && (stdout || '').trim() === 'running';
+        resolve();
+      });
+    });
+    checks.push({ label, status: running ? 'ok' : 'warning', message: running ? `${label} actif` : `${label} non démarré` });
+  }
+
+  const hotspotState = await checkService('pixflow-hotspot-api').catch(() => 'unknown');
+  checks.push({
+    label: 'Hotspot',
+    status: hotspotState === 'active' ? 'ok' : hotspotState === 'unknown' ? 'unknown' : 'warning',
+    message: hotspotState === 'active' ? 'Service hotspot actif' : `Service hotspot ${hotspotState}`,
+  });
+
+  const disk = await readDiskStats().catch(() => null);
+  if (disk?.percent != null) {
+    checks.push({
+      label: 'Disque',
+      status: disk.percent >= 95 ? 'error' : disk.percent >= 85 ? 'warning' : 'ok',
+      message: `Disque utilisé à ${disk.percent}%`,
+    });
+  } else {
+    checks.push({ label: 'Disque', status: 'unknown', message: 'Information disque indisponible' });
+  }
+
+  const temp = await readTemperature().catch(() => null);
+  if (temp?.celsius != null) {
+    checks.push({
+      label: 'Température',
+      status: temp.celsius >= 80 ? 'error' : temp.celsius >= 70 ? 'warning' : 'ok',
+      message: `Température CPU : ${temp.celsius} °C`,
+    });
+  } else {
+    checks.push({ label: 'Température', status: 'unknown', message: 'Température indisponible' });
+  }
+
+  const projects = await runDockerExecCat('/data/projects/projects.json').catch(() => null);
+  const activeProject = Array.isArray(projects) ? projects.find((p) => p.active) || null : null;
+  checks.push({
+    label: 'Projet actif',
+    status: activeProject ? 'ok' : 'warning',
+    message: activeProject ? `Projet actif : ${activeProject.name || activeProject.id}` : 'Aucun projet actif',
+  });
+
+  if (activeProject) {
+    const media = await runDockerExecCat('/data/projects/media.json').catch(() => null);
+    const mediaCount = Array.isArray(media)
+      ? media.filter((m) => m.projectId === activeProject.id && m.active !== false).length
+      : null;
+    checks.push({
+      label: 'Médias du projet',
+      status: mediaCount == null ? 'unknown' : mediaCount > 0 ? 'ok' : 'warning',
+      message: mediaCount == null ? 'Médias inaccessibles' : `${mediaCount} média(s) actif(s)`,
+    });
+  }
+
+  return { checks };
+};
+
 const main = async () => {
   const shellPath = await detectShell();
 
@@ -261,6 +475,41 @@ const main = async () => {
       }
       if (req.method === 'GET' && url.pathname === '/system') {
         return sendJson(res, 200, await getSystemInfo());
+      }
+
+      if (req.method === 'GET' && url.pathname === '/pixflow-status') {
+        try {
+          return sendJson(res, 200, await getPixflowStatus());
+        } catch (error) {
+          return sendJson(res, 500, { ok: false, error: error.message || 'Erreur interne' });
+        }
+      }
+
+      if (req.method === 'GET' && url.pathname === '/logs') {
+        const target = url.searchParams.get('target') || '';
+        const allowed = new Set(['backend', 'kiosk', 'hotspot', 'docker', 'system']);
+        if (!allowed.has(target)) return sendJson(res, 400, { ok: false, error: 'target invalide' });
+        try {
+          return sendJson(res, 200, await getLogs(target));
+        } catch (error) {
+          return sendJson(res, 500, { ok: false, target, lines: [], error: error.message || 'Erreur interne' });
+        }
+      }
+
+      if (req.method === 'GET' && url.pathname === '/storage') {
+        try {
+          return sendJson(res, 200, await getStorageInfo());
+        } catch (error) {
+          return sendJson(res, 500, { ok: false, error: error.message || 'Erreur interne' });
+        }
+      }
+
+      if (req.method === 'GET' && url.pathname === '/diagnostic') {
+        try {
+          return sendJson(res, 200, await getDiagnostic());
+        } catch (error) {
+          return sendJson(res, 500, { checks: [], error: error.message || 'Erreur interne' });
+        }
       }
 
       if (req.method === 'PATCH' && url.pathname.startsWith('/commands/')) {

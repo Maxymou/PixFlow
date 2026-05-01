@@ -961,11 +961,12 @@ export function UserMenu({ open, onClose }) {
                 <details className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-slate-100" open>
                   <summary className="cursor-pointer text-sm font-medium text-indigo-300">État PixFlow</summary>
                   <div className="mt-2 space-y-1 text-xs">
-                    <p>Backend : {debugPixflowStatus?.backend || '—'}</p>
+                    <p>Backend : {debugPixflowStatus?.backend?.status || debugPixflowStatus?.backend || '—'}</p>
                     <p>Kiosk : {debugPixflowStatus?.kiosk?.status || '—'}</p>
                     <p>Hotspot : {debugPixflowStatus?.hotspot?.status || '—'}</p>
                     <p>Docker : {debugPixflowStatus?.docker?.status || '—'}</p>
-                    <p>Projet actif : {debugPixflowStatus?.activeProject?.name || '—'}</p>
+                    {debugPixflowStatus?.git?.branch && <p>Branche : {debugPixflowStatus.git.branch}{debugPixflowStatus.git.commit ? ` (${debugPixflowStatus.git.commit})` : ''}</p>}
+                    <p>Projet actif : {debugPixflowStatus?.activeProject?.name || '—'}{debugPixflowStatus?.activeProject?.mediaCount != null ? ` — ${debugPixflowStatus.activeProject.mediaCount} média(s)` : ''}</p>
                   </div>
                 </details>
                 <details className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-slate-100">
@@ -988,7 +989,35 @@ export function UserMenu({ open, onClose }) {
                 </details>
                 <details className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-slate-100">
                   <summary className="cursor-pointer text-sm font-medium text-indigo-300">Stockage médias</summary>
-                  <p className="mt-2 text-xs">{debugStorage?.message || 'Données de stockage indisponibles'}</p>
+                  {debugStorage?.disk ? (
+                    <div className="mt-2 space-y-3 text-xs">
+                      <div>
+                        <p className="mb-1 text-slate-300">Disque</p>
+                        <MetricBar label="Utilisé" value={debugStorage.disk.percent ?? debugStorage.disk.usedPercent} />
+                        {(debugStorage.disk.usedGb != null || debugStorage.disk.used != null) && (
+                          <p className="mt-1 text-slate-400">
+                            {debugStorage.disk.usedGb != null ? `${debugStorage.disk.usedGb} Go` : (debugStorage.disk.used || '—')}
+                            {' / '}
+                            {debugStorage.disk.totalGb != null ? `${debugStorage.disk.totalGb} Go` : (debugStorage.disk.total || '—')}
+                          </p>
+                        )}
+                      </div>
+                      {debugStorage.media && (
+                        <div>
+                          <p className="mb-1 text-slate-300">Médias</p>
+                          <p className="text-slate-400">
+                            Images : {debugStorage.media.imageCount ?? '—'} · Vidéos : {debugStorage.media.videoCount ?? '—'}
+                            {debugStorage.media.totalCount != null ? ` · Total : ${debugStorage.media.totalCount}` : ''}
+                          </p>
+                          {Boolean(debugStorage.media.failedCount) && (
+                            <p className="mt-1 text-rose-400">Erreurs : {debugStorage.media.failedCount}</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-xs text-slate-400">{debugStorage?.message || 'Données de stockage indisponibles'}</p>
+                  )}
                 </details>
 
                 <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">Attention : ces commandes sont exécutées sur le Raspberry Pi. Une mauvaise commande peut bloquer PixFlow.</div>

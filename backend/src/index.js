@@ -1409,11 +1409,12 @@ app.get(['/api/debug/pixflow-status', '/debug/pixflow-status'], async (_req, res
       return res.json(payload || {});
     }
     return res.json({
-      backend: 'online',
-      frontend: 'online',
-      kiosk: latestKioskStatus?.state ? { status: latestKioskStatus.state, service: 'pixflow-kiosk' } : { status: 'unknown', service: 'pixflow-kiosk' },
-      hotspot: { status: hotspotEnabledRuntime ? 'active' : 'inactive' },
-      docker: { status: 'unknown', containers: [] },
+      backend: { status: 'online', message: 'Backend en ligne' },
+      frontend: { status: 'unknown', message: 'Statut non vérifié' },
+      kiosk: latestKioskStatus?.state ? { status: latestKioskStatus.state, service: 'pixflow-kiosk', message: `Kiosk ${latestKioskStatus.state}` } : { status: 'unknown', service: 'pixflow-kiosk', message: 'Statut kiosk indisponible' },
+      hotspot: { status: hotspotEnabledRuntime ? 'active' : 'inactive', message: hotspotEnabledRuntime ? 'Hotspot actif' : 'Hotspot inactif' },
+      docker: { status: 'unknown', containers: [], message: 'Statut Docker indisponible sans helper' },
+      git: null,
       activeProject: null,
     });
   } catch (error) {
