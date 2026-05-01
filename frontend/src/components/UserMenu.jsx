@@ -103,6 +103,7 @@ export function UserMenu({ open, onClose }) {
   const [debugNetworkError, setDebugNetworkError] = useState('');
   const [debugSystemError, setDebugSystemError] = useState('');
   const [copyStatus, setCopyStatus] = useState('');
+  const [isDebugNetworkLoading, setIsDebugNetworkLoading] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -114,11 +115,12 @@ export function UserMenu({ open, onClose }) {
   }, [open]);
 
   useEffect(() => {
-    if (!open || activePanel !== 'debug') return undefined;
+    if (!open || (activePanel !== 'debug' && activePanel !== 'hotspot')) return undefined;
     let cancelled = false;
     let intervalId = null;
 
     const loadNetwork = async () => {
+      if (!cancelled) setIsDebugNetworkLoading(true);
       try {
         const payload = await api('/api/debug/network');
         if (!cancelled) {
@@ -130,6 +132,8 @@ export function UserMenu({ open, onClose }) {
           setDebugNetwork(null);
           setDebugNetworkError('IP SSH indisponible');
         }
+      } finally {
+        if (!cancelled) setIsDebugNetworkLoading(false);
       }
     };
 
@@ -149,8 +153,10 @@ export function UserMenu({ open, onClose }) {
     };
 
     loadNetwork();
-    loadSystem();
-    intervalId = setInterval(loadSystem, 5000);
+    if (activePanel === 'debug') {
+      loadSystem();
+      intervalId = setInterval(loadSystem, 5000);
+    }
     return () => {
       cancelled = true;
       if (intervalId) clearInterval(intervalId);
@@ -624,7 +630,15 @@ export function UserMenu({ open, onClose }) {
 
     return 'Aucun fichier sélectionné';
   })();
-  const otherIps = (debugNetwork?.ips || []).map((item) => `${item.interface} ${item.address}`).join(' · ');
+  const networkIps = Array.isArray(debugNetwork?.ips) ? debugNetwork.ips : [];
+  const otherIps = networkIps.map((item) => `${item.interface} ${item.address}`).join(' · ');
+  const sshIpFromCommand = (() => {
+    if (!debugNetwork?.sshCommand) return '';
+    const match = debugNetwork.sshCommand.match(/@([^\s]+)/);
+    return match?.[1] || '';
+  })();
+  const fallbackIp = networkIps.find((item) => item?.address)?.address || '';
+  const displaySshIp = sshIpFromCommand || fallbackIp;
 
   const handleCopySsh = async () => {
     if (!debugNetwork?.sshCommand) return;
@@ -747,6 +761,27 @@ export function UserMenu({ open, onClose }) {
                     />
                     <span className="slider"></span>
                   </label>
+                </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-900/50 px-3 py-2.5">
+                  <p className="text-sm font-medium text-indigo-300">Connexion SSH</p>
+                  {isDebugNetworkLoading ? (
+                    <p className="mt-2 text-sm text-slate-300">Recherche de l’IP…</p>
+                  ) : debugNetworkError ? (
+                    <p className="mt-2 text-sm text-slate-300">IP SSH indisponible</p>
+                  ) : displaySshIp ? (
+                    <>
+                      <p className="mt-2 text-sm text-slate-100">IP : {displaySshIp}</p>
+                      {debugNetwork?.sshCommand && <p className="mt-1 text-xs text-slate-400">{debugNetwork.sshCommand}</p>}
+                      {debugNetwork?.sshCommand && (
+                        <button type="button" onClick={handleCopySsh} className="mt-3 rounded-lg border border-slate-700 px-3 py-1 text-xs text-slate-100">
+                          Copier
+                        </button>
+                      )}
+                      {copyStatus && <p className="mt-1 text-xs text-slate-400">{copyStatus}</p>}
+                    </>
+                  ) : (
+                    <p className="mt-2 text-sm text-slate-300">Aucune IP détectée</p>
+                  )}
                 </div>
 
                 <label className="block text-sm text-slate-200">
