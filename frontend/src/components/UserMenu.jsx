@@ -356,6 +356,83 @@ export function UserMenu({ open, onClose }) {
     setActivePanel('main');
   };
 
+  const handlePauseScreenSave = async (event) => {
+    event.preventDefault();
+
+    setIsPauseSaving(true);
+    setStatusMessage('');
+    setErrorMessage('');
+
+    try {
+      if (pauseScreenDraft.mode === 'default') {
+        const updated = await api('/api/settings/pause-screen', {
+          method: 'PATCH',
+          body: JSON.stringify({ mode: 'default' }),
+        });
+
+        const nextPauseScreen = {
+          ...DEFAULT_PAUSE_SCREEN,
+          ...(updated?.pauseScreen || {}),
+        };
+
+        setPauseScreen(nextPauseScreen);
+        setPauseScreenDraft(nextPauseScreen);
+        setPausePreviewUrl('');
+        setPauseUploadFile(null);
+        setPauseUploadProgress(0);
+        setPauseUploadPhase('idle');
+        setStatusMessage('Écran de pause enregistré.');
+        setActivePanel('main');
+        return;
+      }
+
+      const currentCustom = pauseScreenDraft;
+
+      if (pauseUploadPhase === 'uploading' || pauseUploadPhase === 'processing' || isPauseAutoUploading) {
+        setErrorMessage('Le média est encore en préparation.');
+        return;
+      }
+
+      if (!currentCustom.mediaFile) {
+        setErrorMessage('Sélectionnez d’abord une image ou une vidéo.');
+        return;
+      }
+
+      if (currentCustom.status === 'processing') {
+        setErrorMessage('Le média est encore en préparation.');
+        return;
+      }
+
+      if (currentCustom.status === 'failed') {
+        setErrorMessage(currentCustom.error || 'Le média personnalisé est en erreur.');
+        return;
+      }
+
+      const updated = await api('/api/settings/pause-screen', {
+        method: 'PATCH',
+        body: JSON.stringify({ mode: 'custom' }),
+      });
+
+      const nextPauseScreen = {
+        ...DEFAULT_PAUSE_SCREEN,
+        ...(updated?.pauseScreen || {}),
+      };
+
+      setPauseScreen(nextPauseScreen);
+      setPauseScreenDraft(nextPauseScreen);
+      setPausePreviewUrl(nextPauseScreen.mediaFile || '');
+      setPauseUploadFile(null);
+      setPauseUploadProgress(100);
+      setPauseUploadPhase('ready');
+      setStatusMessage('Écran de pause enregistré.');
+      setActivePanel('main');
+    } catch (error) {
+      setErrorMessage(parseApiError(error));
+    } finally {
+      setIsPauseSaving(false);
+    }
+  };
+
   const runDebugAction = async (commandItem) => {
     if (!commandItem?.id) return;
 
