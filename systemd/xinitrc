@@ -34,4 +34,10 @@ exec "${CHROMIUM_BIN}" \
   --check-for-update-interval=31536000 \
   --disable-pinch \
   --overscroll-history-navigation=0 \
+  # These flags avoid Chromium GPU-process crashes on Raspberry Pi during HDMI kiosk video playback.
+  --disable-gpu \
+  --disable-software-rasterizer=false \
+  --disable-accelerated-video-decode \
+  --disable-gpu-compositing \
+  --disable-zero-copy \
   "${PIXFLOW_KIOSK_URL:-http://127.0.0.1:3000/player}"
