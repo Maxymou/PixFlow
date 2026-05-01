@@ -73,7 +73,10 @@ export function UserMenu({ open, onClose }) {
   const [pauseUploadProgress, setPauseUploadProgress] = useState(0);
   const [pauseUploadPhase, setPauseUploadPhase] = useState('idle');
   const [isPauseAutoUploading, setIsPauseAutoUploading] = useState(false);
-  const [isDebugRunning, setIsDebugRunning] = useState(false);
+  const [runningCommandId, setRunningCommandId] = useState(null);
+  const [runningCommandLabel, setRunningCommandLabel] = useState('');
+  const [debugResult, setDebugResult] = useState(null);
+  const [debugError, setDebugError] = useState('');
   const [debugStatus, setDebugStatus] = useState({ type: 'idle', message: '', id: '', stdout: '', stderr: '' });
   const [debugCommands, setDebugCommands] = useState([]);
   const [editingCommandId, setEditingCommandId] = useState('');
@@ -359,25 +362,43 @@ export function UserMenu({ open, onClose }) {
     const confirmed = window.confirm('Voulez-vous exécuter cette commande sur le Raspberry Pi ?');
     if (!confirmed) return;
 
-    setIsDebugRunning(true);
-    setDebugStatus({ type: 'running', id: commandItem.id, message: 'Commande en cours…', stdout: '', stderr: '' });
+    const runningMessageByCommandId = {
+      update: 'Mise à jour en cours. Le serveur peut être temporairement indisponible.',
+      'restart-kiosk': 'Redémarrage du kiosk en cours…',
+    };
+
+    setRunningCommandId(commandItem.id);
+    setRunningCommandLabel(commandItem.label || commandItem.id);
+    setDebugResult(null);
+    setDebugError('');
+    setDebugStatus({ type: 'running', id: commandItem.id, message: runningMessageByCommandId[commandItem.id] || 'Commande en cours…', stdout: '', stderr: '' });
 
     try {
       const result = await api('/api/debug/action', {
         method: 'POST',
         body: JSON.stringify({ id: commandItem.id }),
       });
-      setDebugStatus({
+      const statusPayload = {
         type: result?.ok ? 'success' : 'error',
         id: commandItem.id,
         message: result?.message || (result?.ok ? 'Commande exécutée.' : 'Erreur pendant l’exécution de la commande.'),
         stdout: result?.stdout || '',
         stderr: result?.stderr || '',
-      });
+      };
+      setDebugStatus(statusPayload);
+      setDebugResult(statusPayload);
+      if (!result?.ok) {
+        setDebugError(statusPayload.message);
+      }
     } catch (error) {
-      setDebugStatus({ type: 'error', id: commandItem.id, message: 'Erreur pendant l’exécution de la commande.', stdout: '', stderr: parseApiError(error) });
+      const parsedError = parseApiError(error);
+      const errorPayload = { type: 'error', id: commandItem.id, message: 'Erreur pendant l’exécution de la commande.', stdout: '', stderr: parsedError };
+      setDebugStatus(errorPayload);
+      setDebugResult(errorPayload);
+      setDebugError(parsedError);
     } finally {
-      setIsDebugRunning(false);
+      setRunningCommandId(null);
+      setRunningCommandLabel('');
     }
   };
 
@@ -650,11 +671,22 @@ export function UserMenu({ open, onClose }) {
               <div className="flex-1 space-y-4 overflow-y-auto px-4 py-5 md:px-6">
                 <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">Attention : ces commandes sont exécutées sur le Raspberry Pi. Une mauvaise commande peut bloquer PixFlow.</div>
 
+                {runningCommandId && (
+                  <div className="rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-4 py-3">
+                    <p className="text-sm font-medium text-indigo-100">Commande en cours…</p>
+                    <p className="mt-1 text-xs text-indigo-200/80">{runningCommandLabel} en cours…</p>
+                    <p className="mt-1 text-xs text-indigo-200/70">{debugStatus.message}</p>
+                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-800">
+                      <div className="debug-progress-bar h-full rounded-full bg-indigo-500" />
+                    </div>
+                  </div>
+                )}
+
                 {debugCommands.map((cmd) => {
                   const isEditing = editingCommandId === cmd.id;
                   return (
                     <div key={cmd.id} className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 space-y-3">
-                      <button type="button" disabled={isDebugRunning || isDebugSaving} onClick={() => runDebugAction(cmd)} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-left text-sm text-slate-100 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">
+                      <button type="button" disabled={Boolean(runningCommandId) || isDebugSaving} onClick={() => runDebugAction(cmd)} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-left text-sm text-slate-100 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">
                         <p className="font-medium">{cmd.label}</p>
                       </button>
                       <div>
@@ -667,11 +699,11 @@ export function UserMenu({ open, onClose }) {
                       </div>
                       {isEditing ? (
                         <div className="flex gap-2">
-                          <button type="button" onClick={() => saveDebugCommand(cmd)} disabled={isDebugRunning || isDebugSaving} className="rounded bg-indigo-600 px-3 py-2 text-xs text-white disabled:opacity-60">Enregistrer</button>
-                          <button type="button" onClick={cancelEditDebugCommand} disabled={isDebugRunning || isDebugSaving} className="rounded border border-slate-700 px-3 py-2 text-xs">Annuler</button>
+                          <button type="button" onClick={() => saveDebugCommand(cmd)} disabled={Boolean(runningCommandId) || isDebugSaving} className="rounded bg-indigo-600 px-3 py-2 text-xs text-white disabled:opacity-60">Enregistrer</button>
+                          <button type="button" onClick={cancelEditDebugCommand} disabled={Boolean(runningCommandId) || isDebugSaving} className="rounded border border-slate-700 px-3 py-2 text-xs">Annuler</button>
                         </div>
                       ) : (
-                        <button type="button" onClick={() => startEditDebugCommand(cmd)} disabled={isDebugRunning || isDebugSaving} className="rounded border border-slate-700 px-3 py-2 text-xs text-slate-100">Modifier</button>
+                        <button type="button" onClick={() => startEditDebugCommand(cmd)} disabled={Boolean(runningCommandId) || isDebugSaving} className="rounded border border-slate-700 px-3 py-2 text-xs text-slate-100">Modifier</button>
                       )}
                     </div>
                   );
