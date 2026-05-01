@@ -74,7 +74,8 @@ const DEFAULT_DEBUG_COMMANDS = [
 ];
 const DEBUG_COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 const DEBUG_OUTPUT_MAX_LENGTH = 8000;
-const DEBUG_COMMAND_SHELL = process.env.DEBUG_COMMAND_SHELL || 'sh';
+const DEBUG_COMMAND_SHELL = process.env.DEBUG_COMMAND_SHELL || '/usr/bin/bash';
+const debugHostApiUrl = process.env.DEBUG_HOST_API_URL || '';
 let latestKioskCommand = {
   id: 0,
   command: 'play',
@@ -545,6 +546,39 @@ const runShellCommand = (command, timeoutMs = DEBUG_COMMAND_TIMEOUT_MS) => new P
     reject(error);
   });
 });
+
+async function callDebugHostApi(routePath, options = {}) {
+  if (!debugHostApiUrl) {
+    throw new Error('DEBUG_HOST_API_URL non configuré. Les commandes système Raspberry doivent être exécutées via pixflow-debug-api.');
+  }
+
+  const baseUrl = debugHostApiUrl.replace(/\/+$/, '');
+  const response = await fetch(`${baseUrl}${routePath}`, {
+    method: options.method || 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+
+  const rawText = await response.text();
+  let payload = null;
+  try {
+    payload = rawText ? JSON.parse(rawText) : null;
+  } catch {
+    throw new Error(`Invalid debug host API response: ${rawText}`);
+  }
+
+  if (!response.ok) {
+    const error = new Error(payload?.error || payload?.message || `Debug host API failed with status ${response.status}`);
+    error.payload = payload;
+    error.status = response.status;
+    throw error;
+  }
+
+  return payload;
+}
 
 const normalizeDebugCommand = (command) => ({
   id: String(command.id || '').trim(),
@@ -1272,6 +1306,12 @@ app.post('/api/settings/pause-screen/upload', upload.single('file'), uploadPause
 
 app.get(['/api/debug/commands', '/debug/commands'], async (_req, res, next) => {
   try {
+    if (debugHostApiUrl) {
+      const payload = await callDebugHostApi('/commands');
+      return res.json({ commands: Array.isArray(payload?.commands) ? payload.commands : [] });
+    }
+
+    console.warn('DEBUG_HOST_API_URL non configuré. Les commandes système Raspberry doivent être exécutées via pixflow-debug-api.');
     const settings = await readJson(settingsFile);
     const debugCommands = getDebugCommandsFromSettings(settings);
 
@@ -1295,6 +1335,15 @@ app.patch(['/api/debug/commands/:id', '/debug/commands/:id'], async (req, res) =
       return res.status(400).json({ ok: false, error: `La commande dépasse ${DEBUG_COMMAND_MAX_LENGTH} caractères.` });
     }
 
+    if (debugHostApiUrl) {
+      const payload = await callDebugHostApi(`/commands/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: { command },
+      });
+      return res.json(payload);
+    }
+
+    console.warn('DEBUG_HOST_API_URL non configuré. Les commandes système Raspberry doivent être exécutées via pixflow-debug-api.');
     const settings = await readJson(settingsFile);
     const debugCommands = getDebugCommandsFromSettings(settings);
     const index = debugCommands.findIndex((item) => item.id === id);
@@ -1311,7 +1360,7 @@ app.patch(['/api/debug/commands/:id', '/debug/commands/:id'], async (req, res) =
 
     return res.json({ ok: true, command: debugCommands[index] });
   } catch (error) {
-    return res.status(400).json({ ok: false, error: error.message || 'Payload invalide' });
+    return res.status(error.status || 400).json(error.payload || { ok: false, error: error.message || 'Payload invalide' });
   }
 });
 
@@ -1322,6 +1371,15 @@ app.post(['/api/debug/action', '/debug/action'], async (req, res) => {
   }
 
   try {
+    if (debugHostApiUrl) {
+      const payload = await callDebugHostApi('/action', {
+        method: 'POST',
+        body: { id },
+      });
+      return res.json(payload);
+    }
+
+    console.warn('DEBUG_HOST_API_URL non configuré. Les commandes système Raspberry doivent être exécutées via pixflow-debug-api.');
     const settings = await readJson(settingsFile);
     const target = resolveDebugCommand(settings, id);
 
@@ -1351,6 +1409,9 @@ app.post(['/api/debug/action', '/debug/action'], async (req, res) => {
       message: 'Commande exécutée.',
     });
   } catch (error) {
+    if (error.payload) {
+      return res.status(error.status || 500).json(error.payload);
+    }
     const result = error?.result || {};
     return res.status(500).json({
       ok: false,

@@ -71,6 +71,7 @@ EOF
   sudo cp "$ROOT_DIR/systemd/pixflow-hotspot.service" /etc/systemd/system/pixflow-hotspot.service
   sudo cp "$ROOT_DIR/systemd/pixflow-hotspot-api.service" /etc/systemd/system/pixflow-hotspot-api.service
   sudo cp "$ROOT_DIR/systemd/pixflow-captive-portal.service" /etc/systemd/system/pixflow-captive-portal.service
+  sudo cp "$ROOT_DIR/systemd/pixflow-debug-api.service" /etc/systemd/system/pixflow-debug-api.service
   sudo systemctl daemon-reload
   sudo systemctl enable pixflow-hotspot.service
   sudo systemctl restart pixflow-hotspot.service
@@ -78,6 +79,8 @@ EOF
   sudo systemctl restart pixflow-hotspot-api.service
   sudo systemctl enable pixflow-captive-portal.service
   sudo systemctl restart pixflow-captive-portal.service
+  sudo systemctl enable pixflow-debug-api.service
+  sudo systemctl restart pixflow-debug-api.service
 
   docker compose up -d --build backend frontend
 
