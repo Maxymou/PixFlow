@@ -256,6 +256,37 @@ const runFfmpeg = (inputPath, outputPath, { onProgress } = {}) => new Promise((r
   });
 });
 
+const runPauseScreenFfmpeg = (inputPath, outputPath, { onProgress } = {}) => new Promise((resolve, reject) => {
+  let stderr = '';
+  const ffmpeg = spawn('ffmpeg', [
+    '-y',
+    '-i', inputPath,
+    '-vf', "scale='min(1280,iw)':-2,fps=25",
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
+    '-crf', '26',
+    '-pix_fmt', 'yuv420p',
+    '-an',
+    outputPath,
+  ]);
+
+  ffmpeg.stderr.on('data', (data) => {
+    const text = data.toString();
+    stderr += text;
+    const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+    for (const line of lines) {
+      console.log(`[ffmpeg-pause-screen] ${line}`);
+      if (onProgress) onProgress(line);
+    }
+  });
+
+  ffmpeg.on('error', reject);
+  ffmpeg.on('close', (code) => {
+    if (code === 0) resolve();
+    else reject(new Error(`ffmpeg exited with code ${code}: ${stderr}`));
+  });
+});
+
 const normalizeMedia = (item) => ({
   ...item,
   status: item.status || 'ready',
@@ -394,7 +425,7 @@ const processPauseScreenVideoInBackground = async (inputPath, outputPath, finalN
   };
 
   try {
-    await runFfmpeg(inputPath, outputPath, {
+    await runPauseScreenFfmpeg(inputPath, outputPath, {
       onProgress: (line) => {
         const match = line.match(/time=(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/);
         if (!match || !durationSeconds) return;
