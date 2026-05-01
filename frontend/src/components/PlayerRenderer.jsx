@@ -21,6 +21,7 @@ export function PlayerRenderer({
   onVideoError,
   onImageLoad,
   onImageError,
+  pauseScreen,
 }) {
   const isPreview = mode === 'preview';
   const shellClass = isPreview
@@ -31,7 +32,7 @@ export function PlayerRenderer({
   const showStopped = kioskState === 'stopped';
 
   if (showStopped) {
-    return <StateView mode={mode} title='PixFlow' subtitle='Kiosk stopped' />;
+    return <StoppedScreen mode={mode} pauseScreen={pauseScreen} />;
   }
 
   if (offline) {
@@ -88,6 +89,27 @@ export function PlayerRenderer({
       )}
     </div>
   );
+}
+
+function StoppedScreen({ mode, pauseScreen }) {
+  if (pauseScreen?.mode === 'custom' && pauseScreen?.mediaFile) {
+    const mediaClass = mode === 'preview' ? 'h-full w-full object-contain' : 'max-h-full max-w-full object-contain';
+    if (pauseScreen.mediaType === 'video') {
+      return (
+        <div className={mode === 'preview' ? 'relative aspect-video w-full overflow-hidden rounded-xl border border-slate-700 bg-black' : 'relative flex h-screen w-screen items-center justify-center overflow-hidden bg-black'}>
+          <video src={pauseScreen.mediaFile} autoPlay muted loop playsInline preload="auto" controls className={mediaClass} />
+        </div>
+      );
+    }
+    if (pauseScreen.mediaType === 'image') {
+      return (
+        <div className={mode === 'preview' ? 'relative aspect-video w-full overflow-hidden rounded-xl border border-slate-700 bg-black' : 'relative flex h-screen w-screen items-center justify-center overflow-hidden bg-black'}>
+          <img src={pauseScreen.mediaFile} alt="" className={mediaClass} draggable={false} />
+        </div>
+      );
+    }
+  }
+  return <StateView mode={mode} title='PixFlow' subtitle='Kiosk stopped' />;
 }
 
 function StateView({ mode, title, subtitle }) {

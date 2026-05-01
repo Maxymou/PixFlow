@@ -25,6 +25,7 @@ export function PlayerView() {
   const [videoLoadMessage, setVideoLoadMessage] = useState('Chargement de la vidéo...');
   const [videoReady, setVideoReady] = useState(false);
   const [kioskControlState, setKioskControlState] = useState('playing');
+  const [pauseScreen, setPauseScreen] = useState(null);
   const retryTimeoutRef = useRef(null);
   const videoRef = useRef(null);
   const videoLoadTimeoutRef = useRef(null);
@@ -169,6 +170,35 @@ export function PlayerView() {
       }
     }
   }, [clearRetry]);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadPauseScreen = async () => {
+      try {
+        const settings = await api('/api/settings');
+        if (!mounted) return;
+        const nextPauseScreen = settings?.pauseScreen || null;
+        setPauseScreen(nextPauseScreen);
+        if (nextPauseScreen?.mode === 'custom' && nextPauseScreen?.mediaFile) {
+          if (nextPauseScreen.mediaType === 'image') {
+            const img = new Image();
+            img.src = nextPauseScreen.mediaFile;
+          } else if (nextPauseScreen.mediaType === 'video') {
+            const preloadVideo = document.createElement('video');
+            preloadVideo.preload = 'auto';
+            preloadVideo.muted = true;
+            preloadVideo.playsInline = true;
+            preloadVideo.src = nextPauseScreen.mediaFile;
+            preloadVideo.load();
+          }
+        }
+      } catch {
+        setPauseScreen(null);
+      }
+    };
+    loadPauseScreen();
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
     loadPlaylist();
@@ -459,6 +489,7 @@ export function PlayerView() {
       onVideoError={() => { setIsVideoLoading(true); setVideoLoadMessage('Erreur vidéo, passage au média suivant...'); sendHeartbeat({ status: 'error', message: 'Failed to load media' }); markCurrentFailed(); }}
       onImageLoad={() => { sendHeartbeat({ status: kioskControlState === 'paused' ? 'paused' : 'playing', message: null }); }}
       onImageError={markCurrentFailed}
+      pauseScreen={pauseScreen}
     />
   );
 }
