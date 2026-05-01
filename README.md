@@ -103,6 +103,8 @@ maxymou ALL=(root) NOPASSWD: /usr/bin/systemctl restart pixflow-kiosk
 
 ⚠️ Ne pas exposer le panneau Débug sur Internet.
 
+> En mode Raspberry Docker, les commandes Débug sont exécutées depuis le backend. Les commandes système hôte (ex: `systemctl`, `sudo`, chemins hôte) doivent passer par un helper côté hôte ou via des volumes/permissions explicitement configurés.
+
 ## DEV installation (Proxmox / server)
 ```bash
 chmod +x install.sh
