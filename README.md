@@ -266,3 +266,18 @@ sudo systemctl restart NetworkManager
 sleep 5
 sudo /usr/local/bin/pixflow-hotspot ensure
 ```
+
+## Commandes Débug personnalisables
+
+Le menu **Débug** de PixFlow permet maintenant de personnaliser les boutons (libellé, description, action autorisée) directement depuis l’interface.
+
+- La configuration est enregistrée dans `/data/settings.json`, sous la clé `debugCommands`.
+- Seules les actions autorisées par le backend peuvent être exécutées (whitelist stricte).
+- Aucune commande shell libre n’est acceptée côté frontend ou backend.
+- L’exécution réelle passe uniquement par des commandes prédéfinies côté serveur (`update`, `restart-kiosk`, `reboot-raspberry`, `restart-containers`).
+
+Exemple sudoers (si nécessaire):
+
+```txt
+maxymou ALL=(root) NOPASSWD: /usr/bin/systemctl restart pixflow-kiosk, /usr/sbin/reboot
+```

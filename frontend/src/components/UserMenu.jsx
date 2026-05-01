@@ -8,6 +8,12 @@ const INITIAL_FORM = {
 const DEFAULT_PAUSE_SCREEN = { mode: 'default', mediaType: null, mediaFile: null, status: 'ready', progress: 100, originalName: null, error: null };
 
 const OFFLINE_ERROR = 'Impossible de contacter PixFlow. Vérifiez que le serveur est en ligne.';
+const DEFAULT_DEBUG_ACTIONS = [
+  { value: 'update', label: 'Mettre à jour PixFlow', requiresConfirmation: false },
+  { value: 'restart-kiosk', label: 'Relancer le kiosk', requiresConfirmation: false },
+  { value: 'reboot-raspberry', label: 'Redémarrer le Raspberry', requiresConfirmation: true },
+  { value: 'restart-containers', label: 'Relancer les conteneurs Docker', requiresConfirmation: true },
+];
 
 function parseApiError(error) {
   if (!error?.message) return OFFLINE_ERROR;
@@ -74,6 +80,10 @@ export function UserMenu({ open, onClose }) {
   const [isPauseAutoUploading, setIsPauseAutoUploading] = useState(false);
   const [isDebugRunning, setIsDebugRunning] = useState(false);
   const [debugStatus, setDebugStatus] = useState({ type: 'idle', message: '', action: '', stdout: '', stderr: '' });
+  const [debugCommands, setDebugCommands] = useState([]);
+  const [debugActions, setDebugActions] = useState(DEFAULT_DEBUG_ACTIONS);
+  const [isDebugEditMode, setIsDebugEditMode] = useState(false);
+  const [isDebugSaving, setIsDebugSaving] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -127,6 +137,10 @@ export function UserMenu({ open, onClose }) {
         setPauseScreenDraft(resolvedPauseScreen);
         setPausePreviewUrl(resolvedPauseScreen.mediaFile || '');
         setPauseUploadFile(null);
+        const debugPayload = await api('/api/debug/commands');
+        setDebugCommands(debugPayload?.debugCommands || []);
+        setDebugActions(debugPayload?.actions || DEFAULT_DEBUG_ACTIONS);
+
         if (resolvedPauseScreen.status === 'processing') {
           setPauseUploadPhase('processing');
           setPauseUploadProgress(Number(resolvedPauseScreen.progress) || 0);
@@ -345,7 +359,15 @@ export function UserMenu({ open, onClose }) {
     setActivePanel('main');
   };
 
+  const getActionMeta = (action) => debugActions.find((item) => item.value === action);
+
   const runDebugAction = async (action) => {
+    const meta = getActionMeta(action);
+    if (meta?.requiresConfirmation) {
+      const confirmed = window.confirm('Cette action est sensible et peut interrompre le système. Continuer ?');
+      if (!confirmed) return;
+    }
+
     setIsDebugRunning(true);
     setDebugStatus({
       type: 'running',
@@ -428,6 +450,37 @@ export function UserMenu({ open, onClose }) {
       setErrorMessage(parseApiError(error));
     } finally {
       setIsPauseSaving(false);
+    }
+  };
+
+
+  const handleDebugCommandChange = (index, field, value) => {
+    setDebugCommands((prev) => prev.map((cmd, idx) => (idx === index ? { ...cmd, [field]: value } : cmd)));
+  };
+
+  const handleAddDebugCommand = () => {
+    setDebugCommands((prev) => ([...prev, { id: `custom-${Date.now()}`, label: 'Nouvelle commande', description: '', action: debugActions[0]?.value || 'update' }]));
+  };
+
+  const handleRemoveDebugCommand = (index) => {
+    setDebugCommands((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const saveDebugCommands = async () => {
+    setIsDebugSaving(true);
+    setErrorMessage('');
+    setStatusMessage('');
+    try {
+      const payload = { debugCommands };
+      const result = await api('/api/debug/commands', { method: 'PATCH', body: JSON.stringify(payload) });
+      setDebugCommands(result?.debugCommands || debugCommands);
+      setDebugActions(result?.actions || debugActions);
+      setIsDebugEditMode(false);
+      setStatusMessage('Commandes debug enregistrées.');
+    } catch (error) {
+      setErrorMessage(parseApiError(error));
+    } finally {
+      setIsDebugSaving(false);
     }
   };
 
@@ -656,38 +709,44 @@ export function UserMenu({ open, onClose }) {
               </div>
               <div className="flex-1 space-y-4 overflow-y-auto px-4 py-5 md:px-6">
                 <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
-                  Ces commandes agissent directement sur le Raspberry Pi. À utiliser uniquement en maintenance.
+                  Les commandes sont personnalisables, mais les actions système restent limitées à une liste autorisée pour éviter l’exécution de commandes dangereuses.
                 </div>
+                {!isDebugEditMode && <button type="button" onClick={() => setIsDebugEditMode(true)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-100">Modifier les commandes</button>}
 
-                <button
-                  type="button"
-                  disabled={isDebugRunning}
-                  onClick={() => runDebugAction('update')}
-                  className="w-full rounded-lg border border-slate-800 bg-indigo-600 px-4 py-3 text-left text-sm text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <p className="font-medium">Mettre à jour PixFlow</p>
-                  <p className="text-xs text-indigo-100/90">Lance ./update.sh sur le Raspberry.</p>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={isDebugRunning}
-                  onClick={() => runDebugAction('restart-kiosk')}
-                  className="w-full rounded-lg border border-slate-800 bg-slate-900 px-4 py-3 text-left text-sm text-slate-100 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <p className="font-medium">Relancer le kiosk</p>
-                  <p className="text-xs text-slate-400">Redémarre le service pixflow-kiosk.</p>
-                </button>
+                {isDebugEditMode ? (
+                  <div className="space-y-3">
+                    {debugCommands.map((cmd, index) => (
+                      <div key={`${cmd.id}-${index}`} className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 space-y-2">
+                        <input className="w-full rounded bg-slate-900 border border-slate-700 px-2 py-1 text-sm" value={cmd.label} onChange={(e) => handleDebugCommandChange(index, 'label', e.target.value)} placeholder="Nom du bouton" />
+                        <input className="w-full rounded bg-slate-900 border border-slate-700 px-2 py-1 text-sm" value={cmd.description} onChange={(e) => handleDebugCommandChange(index, 'description', e.target.value)} placeholder="Description" />
+                        <select className="w-full rounded bg-slate-900 border border-slate-700 px-2 py-1 text-sm" value={cmd.action} onChange={(e) => handleDebugCommandChange(index, 'action', e.target.value)}>
+                          {debugActions.map((action) => <option key={action.value} value={action.value}>{action.label}</option>)}
+                        </select>
+                        <button type="button" onClick={() => handleRemoveDebugCommand(index)} className="text-xs text-rose-300">Supprimer</button>
+                      </div>
+                    ))}
+                    <div className="flex gap-2">
+                      <button type="button" onClick={handleAddDebugCommand} className="rounded border border-slate-700 px-3 py-2 text-xs">Ajouter une commande</button>
+                      <button type="button" onClick={saveDebugCommands} disabled={isDebugSaving} className="rounded bg-indigo-600 px-3 py-2 text-xs">Enregistrer</button>
+                      <button type="button" onClick={() => setIsDebugEditMode(false)} className="rounded border border-slate-700 px-3 py-2 text-xs">Annuler</button>
+                    </div>
+                  </div>
+                ) : debugCommands.map((cmd) => (
+                  <button key={cmd.id} type="button" disabled={isDebugRunning} onClick={() => runDebugAction(cmd.action)} className="w-full rounded-lg border border-slate-800 bg-slate-900 px-4 py-3 text-left text-sm text-slate-100 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">
+                    <p className="font-medium">{cmd.label}</p>
+                    <p className="text-xs text-slate-400">{cmd.description}</p>
+                  </button>
+                ))}
 
                 {debugStatus.type !== 'idle' && (
                   <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-3 text-xs">
-                    <p className={`font-medium ${debugStatus.type === 'error' ? 'text-rose-400' : debugStatus.type === 'warning' ? 'text-amber-300' : debugStatus.type === 'running' ? 'text-slate-300' : 'text-emerald-400'}`}>
-                      {debugStatus.message}
-                    </p>
+                    <p className={`font-medium ${debugStatus.type === 'error' ? 'text-rose-400' : debugStatus.type === 'warning' ? 'text-amber-300' : debugStatus.type === 'running' ? 'text-slate-300' : 'text-emerald-400'}`}>{debugStatus.message}</p>
                     {debugStatus.stdout && <pre className="mt-2 max-h-32 overflow-auto rounded border border-slate-800 bg-black/60 p-2 text-slate-300">{debugStatus.stdout}</pre>}
                     {debugStatus.stderr && <pre className="mt-2 max-h-32 overflow-auto rounded border border-slate-800 bg-black/60 p-2 text-rose-300">{debugStatus.stderr}</pre>}
                   </div>
                 )}
+                {statusMessage && !errorMessage && <p className="text-sm text-emerald-400">{statusMessage}</p>}
+                {errorMessage && <p className="text-sm text-rose-400">{errorMessage}</p>}
               </div>
             </div>
           )}
