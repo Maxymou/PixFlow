@@ -176,6 +176,21 @@ export function UserMenu({ open, onClose }) {
   }, [open, onClose]);
 
   useEffect(() => {
+    if (!open) return undefined;
+
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+    };
+  }, [open]);
+
+  useEffect(() => {
     if (!open) return;
 
     let mounted = true;
@@ -668,9 +683,9 @@ export function UserMenu({ open, onClose }) {
         role="dialog"
         aria-modal="true"
         aria-label={activePanel === 'hotspot' ? 'HotSpot Wi-Fi' : activePanel === 'pauseScreen' ? 'Écran de pause' : activePanel === 'debug' ? 'Débug' : 'Paramètres PixFlow'}
-        className="fixed left-0 top-0 z-50 h-full w-[86vw] max-w-sm border-r border-slate-800 bg-slate-950 shadow-2xl md:max-w-md"
+        className="fixed left-0 top-0 z-50 h-dvh w-[86vw] max-w-sm overflow-hidden border-r border-slate-800 bg-slate-950 shadow-2xl md:max-w-md"
       >
-        <div className="flex h-full flex-col">
+        <div className="flex h-full min-h-0 flex-col">
           {activePanel === 'main' ? (
             <>
               <div className="border-b border-slate-800 px-4 py-4 md:px-6">
@@ -880,14 +895,19 @@ export function UserMenu({ open, onClose }) {
               </div>
             </form>
           ) : (
-            <div className="flex flex-1 flex-col">
-              <div className="border-b border-slate-800 px-4 py-4 md:px-6">
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="shrink-0 border-b border-slate-800 px-4 py-4 md:px-6">
                 <button type="button" onClick={() => setActivePanel('main')} className="mb-2 text-sm text-slate-300 transition hover:text-slate-100">&lt; Retour</button>
                 <h2 className="text-lg font-semibold text-slate-100">Débug</h2>
                 <p className="text-sm text-slate-400">Commandes système Raspberry</p>
               </div>
-              <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5 pb-8 md:px-6">
-                <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-slate-100">
+              <div
+                className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y px-4 py-5 pb-8 md:px-6"
+                onWheel={(event) => event.stopPropagation()}
+                onTouchMove={(event) => event.stopPropagation()}
+              >
+                <div className="space-y-5">
+                  <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-slate-100">
                   <p className="text-sm font-medium text-indigo-300">Connexion SSH</p>
                   <p className="mt-2 text-sm">{debugNetwork?.sshCommand || debugNetworkError || 'IP SSH indisponible'}</p>
                   {otherIps && <p className="mt-1 text-xs text-slate-400">Autres IP : {otherIps}</p>}
@@ -959,6 +979,7 @@ export function UserMenu({ open, onClose }) {
                 )}
                 {statusMessage && !errorMessage && <p className="text-sm text-emerald-400">{statusMessage}</p>}
                 {errorMessage && <p className="text-sm text-rose-400">{errorMessage}</p>}
+                </div>
               </div>
             </div>
           )}
