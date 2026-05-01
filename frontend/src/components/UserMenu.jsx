@@ -26,6 +26,7 @@ function parseApiError(error) {
 }
 
 export function UserMenu({ open, onClose }) {
+  const [activePanel, setActivePanel] = useState('main');
   const [form, setForm] = useState(INITIAL_FORM);
   const [hotspot, setHotspot] = useState({
     enabled: true,
@@ -36,6 +37,15 @@ export function UserMenu({ open, onClose }) {
   const [isHotspotSaving, setIsHotspotSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    if (!open) {
+      setActivePanel('main');
+      return;
+    }
+
+    setActivePanel('main');
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -92,9 +102,7 @@ export function UserMenu({ open, onClose }) {
     setForm((prev) => ({ ...prev, [field]: event.target.value }));
   };
 
-  const handleCancel = () => {
-    onClose();
-  };
+  const handleCancel = () => setActivePanel('main');
 
   const handleHotspotToggle = async (event) => {
     const nextEnabled = event.target.checked;
@@ -195,95 +203,124 @@ export function UserMenu({ open, onClose }) {
       <aside
         role="dialog"
         aria-modal="true"
-        aria-label="Paramètres PixFlow"
+        aria-label={activePanel === 'hotspot' ? 'HotSpot Wi-Fi' : 'Paramètres PixFlow'}
         className="fixed left-0 top-0 z-50 h-full w-[86vw] max-w-sm border-r border-slate-800 bg-slate-950 shadow-2xl md:max-w-md"
       >
         <div className="flex h-full flex-col">
-          <div className="border-b border-slate-800 px-4 py-4 md:px-6">
-            <h2 className="text-lg font-semibold text-slate-100">Paramètres PixFlow</h2>
-            <p className="text-sm text-slate-400">Configuration locale</p>
-          </div>
-
-          <form onSubmit={handleSave} className="flex flex-1 flex-col">
-            <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5 md:px-6">
-              <section>
-                <h3 className="text-sm font-medium text-indigo-300">Hotspot Wi-Fi</h3>
-
-                <div className="mt-4 space-y-4">
-                  <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/50 px-3 py-2.5">
-                    <div>
-                      <p className="text-sm text-slate-200">Hotspot Wi-Fi</p>
-                      <p className={`text-xs ${hotspot.enabled ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {hotspot.enabled ? 'Activé' : 'Désactivé'}
-                      </p>
+          {activePanel === 'main' ? (
+            <>
+              <div className="border-b border-slate-800 px-4 py-4 md:px-6">
+                <h2 className="text-lg font-semibold text-slate-100">Paramètres PixFlow</h2>
+                <p className="text-sm text-slate-400">Configuration locale</p>
+              </div>
+              <div className="flex flex-1 flex-col">
+                <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5 md:px-6">
+                  <button
+                    type="button"
+                    onClick={() => setActivePanel('hotspot')}
+                    className="w-full rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-3 text-left transition hover:bg-slate-900"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-slate-100">HotSpot Wi-Fi</p>
+                        <p className="text-xs text-slate-400">Réseau local et accès Wi-Fi</p>
+                      </div>
+                      <span className="text-lg text-slate-400">›</span>
                     </div>
-                    <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={hotspot.enabled}
-                        onChange={handleHotspotToggle}
-                        disabled={isHotspotSaving || isLoading}
-                      />
-                      <span className="slider"></span>
-                    </label>
+                  </button>
+                </div>
+                <div className="mt-auto flex items-center justify-end border-t border-slate-800 px-4 py-4 md:px-6">
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:bg-slate-800"
+                  >
+                    Fermer
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <form onSubmit={handleSave} className="flex flex-1 flex-col">
+              <div className="border-b border-slate-800 px-4 py-4 md:px-6">
+                <button
+                  type="button"
+                  onClick={() => setActivePanel('main')}
+                  className="mb-2 text-sm text-slate-300 transition hover:text-slate-100"
+                >
+                  &lt; Retour
+                </button>
+                <h2 className="text-lg font-semibold text-slate-100">HotSpot Wi-Fi</h2>
+                <p className="text-sm text-slate-400">Réglages du réseau local</p>
+              </div>
+
+              <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5 md:px-6">
+                <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/50 px-3 py-2.5">
+                  <div>
+                    <p className="text-sm text-slate-200">Hotspot Wi-Fi</p>
+                    <p className={`text-xs ${hotspot.enabled ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {hotspot.enabled ? 'Activé' : 'Désactivé'}
+                    </p>
                   </div>
-
-                  <label className="block text-sm text-slate-200">
-                    Nom du réseau Wi-Fi
+                  <label className="switch">
                     <input
-                      type="text"
-                      value={form.ssid}
-                      onChange={handleChange('ssid')}
-                      placeholder="PixFlow"
-                      maxLength={32}
-                      className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-600/40"
+                      type="checkbox"
+                      checked={hotspot.enabled}
+                      onChange={handleHotspotToggle}
+                      disabled={isHotspotSaving || isLoading || isSaving}
                     />
-                  </label>
-
-                  <label className="block text-sm text-slate-200">
-                    Mot de passe Wi-Fi
-                    <input
-                      type="text"
-                      value={form.password}
-                      onChange={handleChange('password')}
-                      placeholder="Minimum 8 caractères"
-                      minLength={8}
-                      maxLength={63}
-                      className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-600/40"
-                    />
+                    <span className="slider"></span>
                   </label>
                 </div>
-              </section>
 
-              {isLoading && <p className="text-sm text-slate-400">Chargement des paramètres…</p>}
-              {statusMessage && !errorMessage && <p className="text-sm text-emerald-400">{statusMessage}</p>}
-              {errorMessage && <p className="text-sm text-rose-400">{errorMessage}</p>}
-            </div>
+                <label className="block text-sm text-slate-200">
+                  Nom du réseau Wi-Fi
+                  <input
+                    type="text"
+                    value={form.ssid}
+                    onChange={handleChange('ssid')}
+                    placeholder="PixFlow"
+                    maxLength={32}
+                    className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-600/40"
+                  />
+                </label>
 
-            <div className="mt-auto flex items-center justify-end gap-3 border-t border-slate-800 px-4 py-4 md:px-6">
-              <button
-                type="button"
-                onClick={handleCancel}
-                className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:bg-slate-800"
-              >
-                Annuler
-              </button>
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isSaving ? 'Enregistrement…' : 'Enregistrer'}
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:bg-slate-800"
-              >
-                Fermer
-              </button>
-            </div>
-          </form>
+                <label className="block text-sm text-slate-200">
+                  Mot de passe Wi-Fi
+                  <input
+                    type="text"
+                    value={form.password}
+                    onChange={handleChange('password')}
+                    placeholder="Minimum 8 caractères"
+                    minLength={8}
+                    maxLength={63}
+                    className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-600/40"
+                  />
+                </label>
+
+                {isLoading && <p className="text-sm text-slate-400">Chargement des paramètres…</p>}
+                {statusMessage && !errorMessage && <p className="text-sm text-emerald-400">{statusMessage}</p>}
+                {errorMessage && <p className="text-sm text-rose-400">{errorMessage}</p>}
+              </div>
+
+              <div className="mt-auto flex items-center justify-end gap-3 border-t border-slate-800 px-4 py-4 md:px-6">
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:bg-slate-800"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSaving ? 'Enregistrement…' : 'Enregistrer'}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       </aside>
     </>
