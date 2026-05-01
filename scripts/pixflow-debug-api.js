@@ -117,6 +117,17 @@ const runShellCommand = async (command, shellPath) => new Promise((resolve, reje
   });
 });
 
+const runShellCommandDetached = (command, shellPath) => {
+  const child = spawn(shellPath, ['-lc', command], {
+    cwd: PROJECT_DIR,
+    detached: true,
+    stdio: 'ignore',
+  });
+
+  child.unref();
+  return { background: true };
+};
+
 const isPrivateIpv4 = (ip) => /^10\./.test(ip) || /^192\.168\./.test(ip) || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ip);
 
 const getNetworkInfo = () => {
@@ -276,6 +287,17 @@ const main = async () => {
         const target = commands.find((item) => item.id === id);
         const command = String(target?.command || '').trim();
         if (!command) return sendJson(res, 400, { ok: false, id, message: 'Commande vide ou non configurée.' });
+
+        if (id === 'update') {
+          runShellCommandDetached(command, shellPath);
+          return sendJson(res, 202, {
+            ok: true,
+            id,
+            command,
+            background: true,
+            message: 'Mise à jour lancée. Le serveur peut être temporairement indisponible.',
+          });
+        }
 
         try {
           const result = await runShellCommand(command, shellPath);
