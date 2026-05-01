@@ -59,52 +59,17 @@ let latestKioskStatus = null;
 const KIOSK_HEARTBEAT_TIMEOUT_MS = 15_000;
 const ALLOWED_KIOSK_STATES = new Set(['playing', 'paused', 'stopped', 'loading', 'idle', 'error', 'no_active_project']);
 const ALLOWED_KIOSK_COMMANDS = new Set(['pause', 'play', 'stop']);
-const DEBUG_MAX_COMMANDS = 8;
-const DEBUG_LABEL_MAX_LENGTH = 64;
-const DEBUG_DESCRIPTION_MAX_LENGTH = 200;
-const DEBUG_ACTIONS = {
-  update: {
-    value: 'update',
-    label: 'Mettre à jour PixFlow',
-    command: 'bash',
-    args: ['-lc', 'cd /home/maxymou/PixFlow && ./update.sh'],
-    requiresConfirmation: false,
-  },
-  'restart-kiosk': {
-    value: 'restart-kiosk',
-    label: 'Relancer le kiosk',
-    command: 'sudo',
-    args: ['systemctl', 'restart', 'pixflow-kiosk'],
-    requiresConfirmation: false,
-  },
-  'reboot-raspberry': {
-    value: 'reboot-raspberry',
-    label: 'Redémarrer le Raspberry',
-    command: 'sudo',
-    args: ['reboot'],
-    requiresConfirmation: true,
-  },
-  'restart-containers': {
-    value: 'restart-containers',
-    label: 'Relancer les conteneurs Docker',
-    command: 'bash',
-    args: ['-lc', 'cd /home/maxymou/PixFlow && docker compose up -d --build'],
-    requiresConfirmation: true,
-  },
-};
-const ALLOWED_DEBUG_ACTIONS = new Set(Object.keys(DEBUG_ACTIONS));
+const DEBUG_COMMAND_MAX_LENGTH = 500;
 const DEFAULT_DEBUG_COMMANDS = [
   {
     id: 'update',
     label: 'Mettre à jour PixFlow',
-    description: 'Lance ./update.sh sur le Raspberry.',
-    action: 'update',
+    command: 'cd /home/maxymou/PixFlow && ./update.sh',
   },
   {
     id: 'restart-kiosk',
     label: 'Relancer le kiosk',
-    description: 'Redémarre le service pixflow-kiosk.',
-    action: 'restart-kiosk',
+    command: 'sudo systemctl restart pixflow-kiosk',
   },
 ];
 const DEBUG_COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
@@ -529,16 +494,20 @@ const runCommand = (command, args = []) => new Promise((resolve, reject) => {
 const trimCommandOutput = (value) => {
   if (typeof value !== 'string') return '';
   if (value.length <= DEBUG_OUTPUT_MAX_LENGTH) return value;
-  return `${value.slice(0, DEBUG_OUTPUT_MAX_LENGTH)}\n...[truncated]`;
+  return `${value.slice(-DEBUG_OUTPUT_MAX_LENGTH)}`;
 };
 
-const runCommandWithTimeout = (command, args = [], { timeoutMs = DEBUG_COMMAND_TIMEOUT_MS } = {}) => new Promise((resolve, reject) => {
-  const child = spawn(command, args);
+const runShellCommand = (command, timeoutMs = DEBUG_COMMAND_TIMEOUT_MS) => new Promise((resolve, reject) => {
+  const child = spawn('bash', ['-lc', command], {
+    cwd: '/home/maxymou/PixFlow',
+  });
+
   let stdout = '';
   let stderr = '';
-  let didTimeout = false;
+  let timedOut = false;
+
   const timer = setTimeout(() => {
-    didTimeout = true;
+    timedOut = true;
     child.kill('SIGTERM');
   }, timeoutMs);
 
@@ -557,41 +526,40 @@ const runCommandWithTimeout = (command, args = [], { timeoutMs = DEBUG_COMMAND_T
 
   child.on('close', (code) => {
     clearTimeout(timer);
-    const trimmedStdout = trimCommandOutput(stdout);
-    const trimmedStderr = trimCommandOutput(stderr);
 
-    if (didTimeout) {
-      return reject(new Error(`Command timed out after ${timeoutMs}ms`));
+    const result = {
+      code,
+      stdout: trimCommandOutput(stdout),
+      stderr: trimCommandOutput(stderr),
+      timedOut,
+    };
+
+    if (code === 0 && !timedOut) {
+      resolve(result);
+      return;
     }
 
-    if (code === 0) {
-      return resolve({ stdout: trimmedStdout, stderr: trimmedStderr });
-    }
-
-    return reject(new Error(`${command} ${args.join(' ')} failed with code ${code}: ${trimmedStderr || trimmedStdout}`));
+    const error = new Error(timedOut ? 'Commande interrompue : délai dépassé.' : `Commande terminée avec le code ${code}`);
+    error.result = result;
+    reject(error);
   });
 });
-
 
 const normalizeDebugCommand = (command) => ({
   id: String(command.id || '').trim(),
   label: String(command.label || '').trim(),
-  description: String(command.description || '').trim(),
-  action: String(command.action || '').trim(),
+  command: String(command.command || '').trim(),
 });
 
 const validateDebugCommands = (commands) => {
   if (!Array.isArray(commands)) throw new Error('debugCommands must be an array');
-  if (commands.length > DEBUG_MAX_COMMANDS) throw new Error(`debugCommands cannot exceed ${DEBUG_MAX_COMMANDS} items`);
 
   const seenIds = new Set();
   return commands.map((raw, index) => {
     const cmd = normalizeDebugCommand(raw || {});
-    if (!cmd.id || !cmd.label || !cmd.description || !cmd.action) throw new Error(`debugCommands[${index}] is incomplete`);
+    if (!cmd.id || !cmd.label || !cmd.command) throw new Error(`debugCommands[${index}] is incomplete`);
     if (cmd.id.length > 40) throw new Error(`debugCommands[${index}].id is too long`);
-    if (cmd.label.length > DEBUG_LABEL_MAX_LENGTH) throw new Error(`debugCommands[${index}].label is too long`);
-    if (cmd.description.length > DEBUG_DESCRIPTION_MAX_LENGTH) throw new Error(`debugCommands[${index}].description is too long`);
-    if (!ALLOWED_DEBUG_ACTIONS.has(cmd.action)) throw new Error(`debugCommands[${index}].action is invalid`);
+    if (cmd.command.length > DEBUG_COMMAND_MAX_LENGTH) throw new Error(`debugCommands[${index}].command is too long`);
     if (seenIds.has(cmd.id)) throw new Error(`debugCommands[${index}].id must be unique`);
     seenIds.add(cmd.id);
     return cmd;
@@ -607,13 +575,6 @@ const getDebugCommandsFromSettings = (settings) => {
     return DEFAULT_DEBUG_COMMANDS;
   }
 };
-
-const runDebugAction = async (action) => {
-  const definition = DEBUG_ACTIONS[action];
-  if (!definition) throw new Error('Action debug non autorisée');
-  return runCommandWithTimeout(definition.command, definition.args);
-};
-
 const hasCommand = async (command) => {
   try {
     await runCommand('which', [command]);
@@ -1293,54 +1254,80 @@ app.get('/api/debug/commands', async (_req, res, next) => {
   try {
     const settings = await readJson(settingsFile);
     const debugCommands = getDebugCommandsFromSettings(settings);
-    const actions = Object.values(DEBUG_ACTIONS).map(({ value, label, requiresConfirmation }) => ({ value, label, requiresConfirmation }));
-    res.json({ debugCommands, actions, limits: { maxCommands: DEBUG_MAX_COMMANDS, maxLabelLength: DEBUG_LABEL_MAX_LENGTH, maxDescriptionLength: DEBUG_DESCRIPTION_MAX_LENGTH } });
+
+    if (!Array.isArray(settings.debugCommands)) {
+      settings.debugCommands = debugCommands;
+      await writeJson(settingsFile, settings);
+    }
+
+    res.json({ commands: debugCommands });
   } catch (error) { next(error); }
 });
 
-app.patch('/api/debug/commands', async (req, res) => {
+app.patch('/api/debug/commands/:id', async (req, res) => {
   try {
-    const debugCommands = validateDebugCommands(req.body?.debugCommands);
+    const id = typeof req.params?.id === 'string' ? req.params.id.trim() : '';
+    const command = typeof req.body?.command === 'string' ? req.body.command.trim() : '';
+
+    if (!id) return res.status(400).json({ ok: false, error: 'Identifiant invalide.' });
+    if (!command) return res.status(400).json({ ok: false, error: 'La commande ne peut pas être vide.' });
+    if (command.length > DEBUG_COMMAND_MAX_LENGTH) {
+      return res.status(400).json({ ok: false, error: `La commande dépasse ${DEBUG_COMMAND_MAX_LENGTH} caractères.` });
+    }
+
     const settings = await readJson(settingsFile);
+    const debugCommands = getDebugCommandsFromSettings(settings);
+    const index = debugCommands.findIndex((item) => item.id === id);
+
+    if (index === -1) return res.status(404).json({ ok: false, error: 'Commande introuvable.' });
+
+    debugCommands[index] = {
+      ...debugCommands[index],
+      command,
+    };
+
     settings.debugCommands = debugCommands;
     await writeJson(settingsFile, settings);
-    return res.json({ ok: true, debugCommands, actions: Object.values(DEBUG_ACTIONS).map(({ value, label, requiresConfirmation }) => ({ value, label, requiresConfirmation })) });
+
+    return res.json({ ok: true, command: debugCommands[index] });
   } catch (error) {
-    return res.status(400).json({ ok: false, error: error.message || 'Invalid debug commands payload' });
+    return res.status(400).json({ ok: false, error: error.message || 'Payload invalide' });
   }
 });
 
 app.post('/api/debug/action', async (req, res) => {
-  const payloadAction = typeof req.body?.action === 'string' ? req.body.action.trim() : '';
-  const payloadId = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
-  const action = payloadAction || payloadId;
-  if (!ALLOWED_DEBUG_ACTIONS.has(action)) {
-    return res.status(400).json({
-      ok: false,
-      action,
-      error: 'Action debug non autorisée',
-    });
+  const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
+  if (!id) {
+    return res.status(400).json({ ok: false, id, message: 'Identifiant de commande manquant.' });
   }
 
   try {
-    const result = await runDebugAction(action);
-    const message = action === 'update'
-      ? 'Mise à jour lancée. Le serveur peut être temporairement indisponible.'
-      : 'Commande exécutée.';
+    const settings = await readJson(settingsFile);
+    const debugCommands = getDebugCommandsFromSettings(settings);
+    const target = debugCommands.find((item) => item.id === id);
 
+    if (!target) {
+      return res.status(404).json({ ok: false, id, message: 'Commande introuvable.' });
+    }
+
+    const result = await runShellCommand(target.command);
     return res.json({
       ok: true,
-      action,
-      message,
+      id,
+      command: target.command,
       stdout: result.stdout || '',
       stderr: result.stderr || '',
+      message: 'Commande exécutée.',
     });
   } catch (error) {
-    console.error(`[PixFlow] Debug action failed (${action}):`, error);
+    const result = error?.result || {};
     return res.status(500).json({
       ok: false,
-      action,
-      error: error.message || 'Commande debug en échec',
+      id,
+      command: '',
+      stdout: result.stdout || '',
+      stderr: result.stderr || error.message || '',
+      message: error.message || 'Erreur pendant l’exécution de la commande.',
     });
   }
 });

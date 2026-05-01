@@ -78,10 +78,16 @@ cd /home/maxymou/PixFlow
 
 ## Commandes debug depuis l’interface
 
-Le menu Débug peut lancer des actions système prédéfinies :
+Le menu **Débug** affiche les boutons système (ex: *Mettre à jour PixFlow*, *Relancer le kiosk*) et montre la commande shell exécutée sous chaque bouton.
 
-- Mettre à jour PixFlow
-- Relancer le kiosk
+Les commandes sont modifiables directement depuis l’interface via **Modifier** → **Enregistrer**. Elles sont persistées dans `/data/settings.json` sous `debugCommands`.
+
+Commandes par défaut :
+
+```bash
+cd /home/maxymou/PixFlow && ./update.sh
+sudo systemctl restart pixflow-kiosk
+```
 
 Si le redémarrage du kiosk utilise sudo, ajouter une règle sudoers adaptée :
 
@@ -95,7 +101,7 @@ Exemple :
 maxymou ALL=(root) NOPASSWD: /usr/bin/systemctl restart pixflow-kiosk
 ```
 
-Ne pas exposer d’exécution de commande libre depuis l’interface.
+⚠️ Ne pas exposer le panneau Débug sur Internet.
 
 ## DEV installation (Proxmox / server)
 ```bash

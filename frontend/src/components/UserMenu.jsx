@@ -8,12 +8,7 @@ const INITIAL_FORM = {
 const DEFAULT_PAUSE_SCREEN = { mode: 'default', mediaType: null, mediaFile: null, status: 'ready', progress: 100, originalName: null, error: null };
 
 const OFFLINE_ERROR = 'Impossible de contacter PixFlow. Vérifiez que le serveur est en ligne.';
-const DEFAULT_DEBUG_ACTIONS = [
-  { value: 'update', label: 'Mettre à jour PixFlow', requiresConfirmation: false },
-  { value: 'restart-kiosk', label: 'Relancer le kiosk', requiresConfirmation: false },
-  { value: 'reboot-raspberry', label: 'Redémarrer le Raspberry', requiresConfirmation: true },
-  { value: 'restart-containers', label: 'Relancer les conteneurs Docker', requiresConfirmation: true },
-];
+const DEBUG_COMMAND_MAX_LENGTH = 500;
 
 function parseApiError(error) {
   if (!error?.message) return OFFLINE_ERROR;
@@ -79,10 +74,10 @@ export function UserMenu({ open, onClose }) {
   const [pauseUploadPhase, setPauseUploadPhase] = useState('idle');
   const [isPauseAutoUploading, setIsPauseAutoUploading] = useState(false);
   const [isDebugRunning, setIsDebugRunning] = useState(false);
-  const [debugStatus, setDebugStatus] = useState({ type: 'idle', message: '', action: '', stdout: '', stderr: '' });
+  const [debugStatus, setDebugStatus] = useState({ type: 'idle', message: '', id: '', stdout: '', stderr: '' });
   const [debugCommands, setDebugCommands] = useState([]);
-  const [debugActions, setDebugActions] = useState(DEFAULT_DEBUG_ACTIONS);
-  const [isDebugEditMode, setIsDebugEditMode] = useState(false);
+  const [editingCommandId, setEditingCommandId] = useState('');
+  const [editingCommandValue, setEditingCommandValue] = useState('');
   const [isDebugSaving, setIsDebugSaving] = useState(false);
 
   useEffect(() => {
@@ -138,8 +133,7 @@ export function UserMenu({ open, onClose }) {
         setPausePreviewUrl(resolvedPauseScreen.mediaFile || '');
         setPauseUploadFile(null);
         const debugPayload = await api('/api/debug/commands');
-        setDebugCommands(debugPayload?.debugCommands || []);
-        setDebugActions(debugPayload?.actions || DEFAULT_DEBUG_ACTIONS);
+        setDebugCommands(debugPayload?.commands || []);
 
         if (resolvedPauseScreen.status === 'processing') {
           setPauseUploadPhase('processing');
@@ -359,124 +353,70 @@ export function UserMenu({ open, onClose }) {
     setActivePanel('main');
   };
 
-  const getActionMeta = (action) => debugActions.find((item) => item.value === action);
+  const runDebugAction = async (commandItem) => {
+    if (!commandItem?.id) return;
 
-  const runDebugAction = async (action) => {
-    const meta = getActionMeta(action);
-    if (meta?.requiresConfirmation) {
-      const confirmed = window.confirm('Cette action est sensible et peut interrompre le système. Continuer ?');
-      if (!confirmed) return;
-    }
+    const confirmed = window.confirm('Voulez-vous exécuter cette commande sur le Raspberry Pi ?');
+    if (!confirmed) return;
 
     setIsDebugRunning(true);
-    setDebugStatus({
-      type: 'running',
-      action,
-      message: 'Commande en cours…',
-      stdout: '',
-      stderr: '',
-    });
+    setDebugStatus({ type: 'running', id: commandItem.id, message: 'Commande en cours…', stdout: '', stderr: '' });
 
     try {
       const result = await api('/api/debug/action', {
         method: 'POST',
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ id: commandItem.id }),
       });
       setDebugStatus({
-        type: 'success',
-        action,
-        message: result?.message || 'Commande exécutée.',
+        type: result?.ok ? 'success' : 'error',
+        id: commandItem.id,
+        message: result?.message || (result?.ok ? 'Commande exécutée.' : 'Erreur pendant l’exécution de la commande.'),
         stdout: result?.stdout || '',
         stderr: result?.stderr || '',
       });
     } catch (error) {
-      if (action === 'update') {
-        setDebugStatus({
-          type: 'warning',
-          action,
-          message: 'Mise à jour lancée. Le serveur peut être temporairement indisponible.',
-          stdout: '',
-          stderr: parseApiError(error),
-        });
-      } else {
-        setDebugStatus({
-          type: 'error',
-          action,
-          message: 'Erreur pendant l’exécution de la commande.',
-          stdout: '',
-          stderr: parseApiError(error),
-        });
-      }
+      setDebugStatus({ type: 'error', id: commandItem.id, message: 'Erreur pendant l’exécution de la commande.', stdout: '', stderr: parseApiError(error) });
     } finally {
       setIsDebugRunning(false);
     }
   };
 
-  const handlePauseScreenSave = async (event) => {
-    event.preventDefault();
-    setStatusMessage('');
-    setErrorMessage('');
+  const startEditDebugCommand = (commandItem) => {
+    setEditingCommandId(commandItem.id);
+    setEditingCommandValue(commandItem.command || '');
+  };
 
-    if (pauseUploadPhase === 'uploading' || pauseUploadPhase === 'processing') {
-      setErrorMessage('La vidéo est encore en préparation.');
+  const cancelEditDebugCommand = () => {
+    setEditingCommandId('');
+    setEditingCommandValue('');
+  };
+
+  const saveDebugCommand = async (commandItem) => {
+    const value = editingCommandValue.trim();
+    if (!value) {
+      setErrorMessage('La commande ne peut pas être vide.');
+      return;
+    }
+    if (value.length > DEBUG_COMMAND_MAX_LENGTH) {
+      setErrorMessage(`La commande dépasse ${DEBUG_COMMAND_MAX_LENGTH} caractères.`);
       return;
     }
 
-    try {
-      setIsPauseSaving(true);
-      if (pauseScreenDraft.mode === 'default') {
-        const updated = await api('/api/settings/pause-screen', { method: 'PATCH', body: JSON.stringify({ mode: 'default' }) });
-        const nextPauseScreen = { ...DEFAULT_PAUSE_SCREEN, ...(updated?.pauseScreen || {}) };
-        setPauseScreen(nextPauseScreen);
-        setPauseScreenDraft(nextPauseScreen);
-        setPausePreviewUrl('');
-      } else {
-        const isReadyCustom = pauseScreenDraft.status === 'ready' && pauseScreenDraft.mediaFile;
-        if (!isReadyCustom) {
-          setErrorMessage('Sélectionnez d’abord une image ou une vidéo.');
-          return;
-        }
-
-        const updated = await api('/api/settings/pause-screen', { method: 'PATCH', body: JSON.stringify({ mode: 'custom' }) });
-        const nextPauseScreen = { ...DEFAULT_PAUSE_SCREEN, ...(updated?.pauseScreen || {}) };
-        setPauseScreen(nextPauseScreen);
-        setPauseScreenDraft(nextPauseScreen);
-        setPausePreviewUrl(nextPauseScreen.mediaFile || '');
-      }
-      setStatusMessage('Écran de pause enregistré.');
-      setActivePanel('main');
-    } catch (error) {
-      setPauseUploadPhase('failed');
-      setErrorMessage(parseApiError(error));
-    } finally {
-      setIsPauseSaving(false);
-    }
-  };
-
-
-  const handleDebugCommandChange = (index, field, value) => {
-    setDebugCommands((prev) => prev.map((cmd, idx) => (idx === index ? { ...cmd, [field]: value } : cmd)));
-  };
-
-  const handleAddDebugCommand = () => {
-    setDebugCommands((prev) => ([...prev, { id: `custom-${Date.now()}`, label: 'Nouvelle commande', description: '', action: debugActions[0]?.value || 'update' }]));
-  };
-
-  const handleRemoveDebugCommand = (index) => {
-    setDebugCommands((prev) => prev.filter((_, idx) => idx !== index));
-  };
-
-  const saveDebugCommands = async () => {
     setIsDebugSaving(true);
     setErrorMessage('');
-    setStatusMessage('');
+
     try {
-      const payload = { debugCommands };
-      const result = await api('/api/debug/commands', { method: 'PATCH', body: JSON.stringify(payload) });
-      setDebugCommands(result?.debugCommands || debugCommands);
-      setDebugActions(result?.actions || debugActions);
-      setIsDebugEditMode(false);
-      setStatusMessage('Commandes debug enregistrées.');
+      const result = await api(`/api/debug/commands/${encodeURIComponent(commandItem.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ command: value }),
+      });
+
+      const updated = result?.command;
+      if (updated?.id) {
+        setDebugCommands((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      }
+      setStatusMessage('Commande enregistrée.');
+      cancelEditDebugCommand();
     } catch (error) {
       setErrorMessage(parseApiError(error));
     } finally {
@@ -708,39 +648,38 @@ export function UserMenu({ open, onClose }) {
                 <p className="text-sm text-slate-400">Commandes système Raspberry</p>
               </div>
               <div className="flex-1 space-y-4 overflow-y-auto px-4 py-5 md:px-6">
-                <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
-                  Les commandes sont personnalisables, mais les actions système restent limitées à une liste autorisée pour éviter l’exécution de commandes dangereuses.
-                </div>
-                {!isDebugEditMode && <button type="button" onClick={() => setIsDebugEditMode(true)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-100">Modifier les commandes</button>}
+                <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">Attention : ces commandes sont exécutées sur le Raspberry Pi. Une mauvaise commande peut bloquer PixFlow.</div>
 
-                {isDebugEditMode ? (
-                  <div className="space-y-3">
-                    {debugCommands.map((cmd, index) => (
-                      <div key={`${cmd.id}-${index}`} className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 space-y-2">
-                        <input className="w-full rounded bg-slate-900 border border-slate-700 px-2 py-1 text-sm" value={cmd.label} onChange={(e) => handleDebugCommandChange(index, 'label', e.target.value)} placeholder="Nom du bouton" />
-                        <input className="w-full rounded bg-slate-900 border border-slate-700 px-2 py-1 text-sm" value={cmd.description} onChange={(e) => handleDebugCommandChange(index, 'description', e.target.value)} placeholder="Description" />
-                        <select className="w-full rounded bg-slate-900 border border-slate-700 px-2 py-1 text-sm" value={cmd.action} onChange={(e) => handleDebugCommandChange(index, 'action', e.target.value)}>
-                          {debugActions.map((action) => <option key={action.value} value={action.value}>{action.label}</option>)}
-                        </select>
-                        <button type="button" onClick={() => handleRemoveDebugCommand(index)} className="text-xs text-rose-300">Supprimer</button>
+                {debugCommands.map((cmd) => {
+                  const isEditing = editingCommandId === cmd.id;
+                  return (
+                    <div key={cmd.id} className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 space-y-3">
+                      <button type="button" disabled={isDebugRunning || isDebugSaving} onClick={() => runDebugAction(cmd)} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-left text-sm text-slate-100 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">
+                        <p className="font-medium">{cmd.label}</p>
+                      </button>
+                      <div>
+                        <p className="text-xs text-slate-400">Commande exécutée :</p>
+                        {isEditing ? (
+                          <textarea value={editingCommandValue} onChange={(e) => setEditingCommandValue(e.target.value)} maxLength={DEBUG_COMMAND_MAX_LENGTH} rows={3} className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-2 text-xs text-slate-100" />
+                        ) : (
+                          <pre className="mt-1 whitespace-pre-wrap break-words rounded border border-slate-800 bg-black/50 p-2 text-xs text-slate-200">{cmd.command}</pre>
+                        )}
                       </div>
-                    ))}
-                    <div className="flex gap-2">
-                      <button type="button" onClick={handleAddDebugCommand} className="rounded border border-slate-700 px-3 py-2 text-xs">Ajouter une commande</button>
-                      <button type="button" onClick={saveDebugCommands} disabled={isDebugSaving} className="rounded bg-indigo-600 px-3 py-2 text-xs">Enregistrer</button>
-                      <button type="button" onClick={() => setIsDebugEditMode(false)} className="rounded border border-slate-700 px-3 py-2 text-xs">Annuler</button>
+                      {isEditing ? (
+                        <div className="flex gap-2">
+                          <button type="button" onClick={() => saveDebugCommand(cmd)} disabled={isDebugRunning || isDebugSaving} className="rounded bg-indigo-600 px-3 py-2 text-xs text-white disabled:opacity-60">Enregistrer</button>
+                          <button type="button" onClick={cancelEditDebugCommand} disabled={isDebugRunning || isDebugSaving} className="rounded border border-slate-700 px-3 py-2 text-xs">Annuler</button>
+                        </div>
+                      ) : (
+                        <button type="button" onClick={() => startEditDebugCommand(cmd)} disabled={isDebugRunning || isDebugSaving} className="rounded border border-slate-700 px-3 py-2 text-xs text-slate-100">Modifier</button>
+                      )}
                     </div>
-                  </div>
-                ) : debugCommands.map((cmd) => (
-                  <button key={cmd.id} type="button" disabled={isDebugRunning} onClick={() => runDebugAction(cmd.action)} className="w-full rounded-lg border border-slate-800 bg-slate-900 px-4 py-3 text-left text-sm text-slate-100 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">
-                    <p className="font-medium">{cmd.label}</p>
-                    <p className="text-xs text-slate-400">{cmd.description}</p>
-                  </button>
-                ))}
+                  );
+                })}
 
                 {debugStatus.type !== 'idle' && (
                   <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-3 text-xs">
-                    <p className={`font-medium ${debugStatus.type === 'error' ? 'text-rose-400' : debugStatus.type === 'warning' ? 'text-amber-300' : debugStatus.type === 'running' ? 'text-slate-300' : 'text-emerald-400'}`}>{debugStatus.message}</p>
+                    <p className={`font-medium ${debugStatus.type === 'error' ? 'text-rose-400' : debugStatus.type === 'running' ? 'text-slate-300' : 'text-emerald-400'}`}>{debugStatus.message}</p>
                     {debugStatus.stdout && <pre className="mt-2 max-h-32 overflow-auto rounded border border-slate-800 bg-black/60 p-2 text-slate-300">{debugStatus.stdout}</pre>}
                     {debugStatus.stderr && <pre className="mt-2 max-h-32 overflow-auto rounded border border-slate-800 bg-black/60 p-2 text-rose-300">{debugStatus.stderr}</pre>}
                   </div>
