@@ -63,6 +63,9 @@ let latestKioskCommand = {
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
+app.use('/media/pause-screen', express.static(pauseScreenDir, {
+  maxAge: '1d',
+}));
 app.use('/media', express.static(mediaDir, {
   maxAge: '7d',
   immutable: true,
@@ -75,9 +78,6 @@ app.use('/media', express.static(mediaDir, {
       res.setHeader('Cache-Control', 'public, max-age=86400');
     }
   },
-}));
-app.use('/media/pause-screen', express.static(pauseScreenDir, {
-  maxAge: '1d',
 }));
 
 const storage = multer.diskStorage({
@@ -135,6 +135,17 @@ const mediaTypeFromName = (filename, mimetype = '') => {
   if (mimetype.startsWith('image/')) return 'image';
   const ext = path.extname(filename).toLowerCase();
   return VIDEO_EXTENSIONS.has(ext) ? 'video' : 'image';
+};
+
+const clearPauseScreenFiles = async () => {
+  try {
+    const files = await fs.readdir(pauseScreenDir);
+    await Promise.all(
+      files.map((file) => fs.rm(path.join(pauseScreenDir, file), { force: true }))
+    );
+  } catch (error) {
+    console.warn('[PixFlow] Failed to clear pause screen files:', error.message);
+  }
 };
 
 const toHmsSeconds = (value) => {
@@ -942,11 +953,11 @@ app.patch('/settings/hotspot', async (req, res, next) => {
   }
 });
 
-app.patch('/settings/pause-screen', async (req, res, next) => {
+const updatePauseScreenMode = async (req, res, next) => {
   try {
     const mode = typeof req.body?.mode === 'string' ? req.body.mode.trim().toLowerCase() : '';
     if (!['default', 'custom'].includes(mode)) {
-      return res.status(400).json({ error: 'mode must be "default" or "custom"' });
+      return res.status(400).json({ error: 'invalid pause screen mode' });
     }
 
     const settings = await readJson(settingsFile);
@@ -960,46 +971,34 @@ app.patch('/settings/pause-screen', async (req, res, next) => {
     }
 
     if (mode === 'default') {
-      const existingFiles = await fs.readdir(pauseScreenDir);
-      await Promise.all(existingFiles.map((file) => fs.rm(path.join(pauseScreenDir, file), { force: true })));
+      await clearPauseScreenFiles();
+      settings.pauseScreen = { ...DEFAULT_PAUSE_SCREEN };
+    } else {
+      settings.pauseScreen = {
+        mode: 'custom',
+        mediaType: currentPauseScreen.mediaType,
+        mediaFile: currentPauseScreen.mediaFile,
+      };
     }
-
-    settings.pauseScreen = {
-      ...currentPauseScreen,
-      mode,
-      ...(mode === 'default' ? { mediaType: null, mediaFile: null } : {}),
-    };
 
     await writeJson(settingsFile, settings);
     res.json(await buildSettingsResponse());
   } catch (error) { next(error); }
-});
+};
 
-app.post('/settings/pause-screen/upload', upload.single('file'), async (req, res, next) => {
+const uploadPauseScreenMedia = async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'file is required' });
-    const allowedPauseUploadTypes = new Set([
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-      'video/mp4',
-      'video/webm',
-      'video/quicktime',
-    ]);
-    if (!allowedPauseUploadTypes.has(req.file.mimetype)) {
-      return res.status(400).json({ error: 'unsupported file type for pause screen' });
-    }
 
     const mediaType = mediaTypeFromName(req.file.originalname, req.file.mimetype);
     if (!['image', 'video'].includes(mediaType)) {
       return res.status(400).json({ error: 'file must be image or video' });
     }
 
-    const existingFiles = await fs.readdir(pauseScreenDir);
-    await Promise.all(existingFiles.map((file) => fs.rm(path.join(pauseScreenDir, file), { force: true })));
+    await clearPauseScreenFiles();
 
-    const ext = path.extname(req.file.originalname || req.file.filename).toLowerCase() || '.bin';
-    const finalName = `pause-screen-${nanoid()}${ext}`;
+    const ext = path.extname(req.file.originalname || req.file.filename).toLowerCase();
+    const finalName = `pause-screen-${nanoid()}${ext || '.bin'}`;
     const inputPath = path.join(incomingDir, req.file.filename);
     const finalPath = path.join(pauseScreenDir, finalName);
     await fs.rename(inputPath, finalPath);
@@ -1014,7 +1013,12 @@ app.post('/settings/pause-screen/upload', upload.single('file'), async (req, res
 
     res.status(201).json(await buildSettingsResponse());
   } catch (error) { next(error); }
-});
+};
+
+app.patch('/settings/pause-screen', updatePauseScreenMode);
+app.patch('/api/settings/pause-screen', updatePauseScreenMode);
+app.post('/settings/pause-screen/upload', upload.single('file'), uploadPauseScreenMedia);
+app.post('/api/settings/pause-screen/upload', upload.single('file'), uploadPauseScreenMedia);
 
 
 app.use((error, _req, res, _next) => {
