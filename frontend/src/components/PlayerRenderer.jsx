@@ -138,8 +138,6 @@ function StoppedVideo({ mode, src }) {
     video.defaultMuted = true;
     video.playsInline = true;
     video.loop = true;
-    video.src = src;
-    video.load();
 
     const tryPlay = () => {
       const playPromise = video.play();
@@ -162,7 +160,7 @@ function StoppedVideo({ mode, src }) {
       const video = videoRef.current;
       if (!video) return;
 
-      if (video.readyState >= 2) {
+      if (video.readyState >= 1) {
         setIsReady(true);
         const playPromise = video.play();
         if (playPromise?.catch) playPromise.catch(() => {});
@@ -204,7 +202,10 @@ function StoppedVideo({ mode, src }) {
         controls={mode === 'preview'}
         className={mode === 'preview' ? 'h-full w-full object-contain' : 'max-h-full max-w-full object-contain'}
         onLoadStart={() => console.log('[PixFlow] Pause screen video loadstart')}
-        onLoadedMetadata={() => console.log('[PixFlow] Pause screen video loadedmetadata')}
+        onLoadedMetadata={() => {
+          console.log('[PixFlow] Pause screen video loadedmetadata');
+          setIsReady(true);
+        }}
         onLoadedData={() => {
           console.log('[PixFlow] Pause screen video loadeddata');
           setIsReady(true);
