@@ -24,6 +24,7 @@ if [ -z "${CHROMIUM_BIN}" ]; then
   exit 1
 fi
 
+# Disable Chromium GPU acceleration to avoid Raspberry Pi HDMI kiosk video crashes.
 exec "${CHROMIUM_BIN}" \
   --kiosk \
   --noerrdialogs \
@@ -34,7 +35,6 @@ exec "${CHROMIUM_BIN}" \
   --check-for-update-interval=31536000 \
   --disable-pinch \
   --overscroll-history-navigation=0 \
-  # These flags avoid Chromium GPU-process crashes on Raspberry Pi during HDMI kiosk video playback.
   --disable-gpu \
   --disable-software-rasterizer=false \
   --disable-accelerated-video-decode \
