@@ -90,7 +90,7 @@ export function PlayerRenderer({
       {paused && (
         <Badge text='Paused' className='left-2 top-2 border-amber-400/40 bg-amber-500/20 text-amber-200' />
       )}
-      {isVideoLoading && (
+      {mode === 'preview' && isVideoLoading && (
         <div className='absolute inset-0 z-10 flex items-center justify-center bg-black/85 px-8 text-center text-slate-100'>
           <p className='text-sm md:text-base'>{videoLoadMessage}</p>
         </div>
