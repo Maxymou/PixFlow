@@ -76,6 +76,27 @@ cd /home/maxymou/PixFlow
 ./update.sh --kiosk-only
 ```
 
+## Commandes debug depuis l’interface
+
+Le menu Débug peut lancer des actions système prédéfinies :
+
+- Mettre à jour PixFlow
+- Relancer le kiosk
+
+Si le redémarrage du kiosk utilise sudo, ajouter une règle sudoers adaptée :
+
+```bash
+sudo visudo
+```
+
+Exemple :
+
+```txt
+maxymou ALL=(root) NOPASSWD: /usr/bin/systemctl restart pixflow-kiosk
+```
+
+Ne pas exposer d’exécution de commande libre depuis l’interface.
+
 ## DEV installation (Proxmox / server)
 ```bash
 chmod +x install.sh

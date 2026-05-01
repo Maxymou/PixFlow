@@ -72,6 +72,8 @@ export function UserMenu({ open, onClose }) {
   const [pauseUploadProgress, setPauseUploadProgress] = useState(0);
   const [pauseUploadPhase, setPauseUploadPhase] = useState('idle');
   const [isPauseAutoUploading, setIsPauseAutoUploading] = useState(false);
+  const [isDebugRunning, setIsDebugRunning] = useState(false);
+  const [debugStatus, setDebugStatus] = useState({ type: 'idle', message: '', action: '', stdout: '', stderr: '' });
 
   useEffect(() => {
     if (!open) {
@@ -343,6 +345,51 @@ export function UserMenu({ open, onClose }) {
     setActivePanel('main');
   };
 
+  const runDebugAction = async (action) => {
+    setIsDebugRunning(true);
+    setDebugStatus({
+      type: 'running',
+      action,
+      message: 'Commande en cours…',
+      stdout: '',
+      stderr: '',
+    });
+
+    try {
+      const result = await api('/api/debug/action', {
+        method: 'POST',
+        body: JSON.stringify({ action }),
+      });
+      setDebugStatus({
+        type: 'success',
+        action,
+        message: result?.message || 'Commande exécutée.',
+        stdout: result?.stdout || '',
+        stderr: result?.stderr || '',
+      });
+    } catch (error) {
+      if (action === 'update') {
+        setDebugStatus({
+          type: 'warning',
+          action,
+          message: 'Mise à jour lancée. Le serveur peut être temporairement indisponible.',
+          stdout: '',
+          stderr: parseApiError(error),
+        });
+      } else {
+        setDebugStatus({
+          type: 'error',
+          action,
+          message: 'Erreur pendant l’exécution de la commande.',
+          stdout: '',
+          stderr: parseApiError(error),
+        });
+      }
+    } finally {
+      setIsDebugRunning(false);
+    }
+  };
+
   const handlePauseScreenSave = async (event) => {
     event.preventDefault();
     setStatusMessage('');
@@ -409,7 +456,7 @@ export function UserMenu({ open, onClose }) {
       <aside
         role="dialog"
         aria-modal="true"
-        aria-label={activePanel === 'hotspot' ? 'HotSpot Wi-Fi' : activePanel === 'pauseScreen' ? 'Écran de pause' : 'Paramètres PixFlow'}
+        aria-label={activePanel === 'hotspot' ? 'HotSpot Wi-Fi' : activePanel === 'pauseScreen' ? 'Écran de pause' : activePanel === 'debug' ? 'Débug' : 'Paramètres PixFlow'}
         className="fixed left-0 top-0 z-50 h-full w-[86vw] max-w-sm border-r border-slate-800 bg-slate-950 shadow-2xl md:max-w-md"
       >
         <div className="flex h-full flex-col">
@@ -443,6 +490,19 @@ export function UserMenu({ open, onClose }) {
                       <div>
                         <p className="text-sm font-medium text-slate-100">Écran de pause</p>
                         <p className="text-xs text-slate-400">{pauseScreenLabel}</p>
+                      </div>
+                      <span className="text-lg text-slate-400">›</span>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActivePanel('debug')}
+                    className="w-full rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-3 text-left transition hover:bg-slate-900"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-slate-100">Débug</p>
+                        <p className="text-xs text-slate-400">Commandes système Raspberry</p>
                       </div>
                       <span className="text-lg text-slate-400">›</span>
                     </div>
@@ -539,7 +599,7 @@ export function UserMenu({ open, onClose }) {
                 </button>
               </div>
             </form>
-          ) : (
+          ) : activePanel === 'pauseScreen' ? (
             <form onSubmit={handlePauseScreenSave} className="flex flex-1 flex-col">
               <div className="border-b border-slate-800 px-4 py-4 md:px-6">
                 <button type="button" onClick={() => setActivePanel('main')} className="mb-2 text-sm text-slate-300 transition hover:text-slate-100">&lt; Retour</button>
@@ -587,6 +647,49 @@ export function UserMenu({ open, onClose }) {
                 <button type="submit" disabled={isPauseSaving || isPauseAutoUploading || pauseUploadPhase === 'uploading' || pauseUploadPhase === 'processing'} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60">{isPauseSaving ? 'Enregistrement…' : (pauseUploadPhase === 'uploading' || pauseUploadPhase === 'processing') ? 'Préparation…' : 'Enregistrer'}</button>
               </div>
             </form>
+          ) : (
+            <div className="flex flex-1 flex-col">
+              <div className="border-b border-slate-800 px-4 py-4 md:px-6">
+                <button type="button" onClick={() => setActivePanel('main')} className="mb-2 text-sm text-slate-300 transition hover:text-slate-100">&lt; Retour</button>
+                <h2 className="text-lg font-semibold text-slate-100">Débug</h2>
+                <p className="text-sm text-slate-400">Commandes système Raspberry</p>
+              </div>
+              <div className="flex-1 space-y-4 overflow-y-auto px-4 py-5 md:px-6">
+                <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
+                  Ces commandes agissent directement sur le Raspberry Pi. À utiliser uniquement en maintenance.
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isDebugRunning}
+                  onClick={() => runDebugAction('update')}
+                  className="w-full rounded-lg border border-slate-800 bg-indigo-600 px-4 py-3 text-left text-sm text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <p className="font-medium">Mettre à jour PixFlow</p>
+                  <p className="text-xs text-indigo-100/90">Lance ./update.sh sur le Raspberry.</p>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isDebugRunning}
+                  onClick={() => runDebugAction('restart-kiosk')}
+                  className="w-full rounded-lg border border-slate-800 bg-slate-900 px-4 py-3 text-left text-sm text-slate-100 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <p className="font-medium">Relancer le kiosk</p>
+                  <p className="text-xs text-slate-400">Redémarre le service pixflow-kiosk.</p>
+                </button>
+
+                {debugStatus.type !== 'idle' && (
+                  <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-3 text-xs">
+                    <p className={`font-medium ${debugStatus.type === 'error' ? 'text-rose-400' : debugStatus.type === 'warning' ? 'text-amber-300' : debugStatus.type === 'running' ? 'text-slate-300' : 'text-emerald-400'}`}>
+                      {debugStatus.message}
+                    </p>
+                    {debugStatus.stdout && <pre className="mt-2 max-h-32 overflow-auto rounded border border-slate-800 bg-black/60 p-2 text-slate-300">{debugStatus.stdout}</pre>}
+                    {debugStatus.stderr && <pre className="mt-2 max-h-32 overflow-auto rounded border border-slate-800 bg-black/60 p-2 text-rose-300">{debugStatus.stderr}</pre>}
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </aside>
