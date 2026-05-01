@@ -49,6 +49,11 @@ if [ ! -f "$ROOT_DIR/systemd/pixflow-kiosk.service" ]; then
   exit 1
 fi
 
+if [ ! -f "$ROOT_DIR/systemd/pixflow-debug-api.service" ]; then
+  echo "Missing file: $ROOT_DIR/systemd/pixflow-debug-api.service"
+  exit 1
+fi
+
 cd "$ROOT_DIR"
 
 echo "=============================="
@@ -57,15 +62,15 @@ echo "=============================="
 echo ""
 
 if [ "$KIOSK_ONLY" -eq 0 ]; then
-  echo "[1/7] Pull latest code..."
+  echo "[1/8] Pull latest code..."
   git pull
 
-  echo "[2/7] Ensure scripts are executable..."
+  echo "[2/8] Ensure scripts are executable..."
   chmod +x "$ROOT_DIR/install.sh" || true
   chmod +x "$ROOT_DIR/update.sh" || true
   chmod +x "$ROOT_DIR/scripts/"*.sh || true
 
-  echo "[3/7] Rebuild and restart Docker services..."
+  echo "[3/8] Rebuild and restart Docker services..."
   if tr -d '\0' </sys/firmware/devicetree/base/model 2>/dev/null | grep -qi "raspberry"; then
     docker compose --profile prod up -d --build
   else
@@ -75,25 +80,30 @@ else
   echo "[kiosk-only] Skipping git pull and Docker rebuild."
 fi
 
-echo "[4/7] Install kiosk xinitrc..."
+echo "[4/8] Install kiosk xinitrc..."
 sudo install -m 0755 -o "$KIOSK_USER" -g "$KIOSK_USER" "$ROOT_DIR/systemd/xinitrc" "$KIOSK_HOME/.xinitrc"
 
-echo "[5/7] Install systemd kiosk service..."
+echo "[5/8] Install systemd kiosk and debug-api services..."
 sudo install -m 0644 "$ROOT_DIR/systemd/pixflow-kiosk.service" /etc/systemd/system/pixflow-kiosk.service
+sudo install -m 0644 "$ROOT_DIR/systemd/pixflow-debug-api.service" /etc/systemd/system/pixflow-debug-api.service
 sudo systemctl daemon-reload
 sudo systemctl enable pixflow-kiosk
+sudo systemctl enable pixflow-debug-api
 
-echo "[6/7] Restart kiosk service..."
+echo "[6/8] Restart kiosk and debug-api services..."
 sudo systemctl restart pixflow-kiosk || true
+sudo systemctl restart pixflow-debug-api || true
 
-echo "[6.5/7] Validate installed service entries..."
+echo "[7/8] Validate installed service entries..."
 sudo systemctl cat pixflow-kiosk | grep -E "ExecStart|ExecStartPre|PIXFLOW_KIOSK_URL"
+sudo systemctl cat pixflow-debug-api | grep -E "ExecStart|DEBUG_HOST_API_BIND"
 
-echo "[7/7] Status..."
+echo "[8/8] Status..."
 if [ "$KIOSK_ONLY" -eq 0 ]; then
   docker compose ps
 fi
 sudo systemctl status pixflow-kiosk --no-pager -l || true
+sudo systemctl status pixflow-debug-api --no-pager -l || true
 
 echo ""
 echo "PixFlow update complete."
@@ -103,3 +113,4 @@ echo ""
 echo "Logs:"
 echo "  docker compose logs -f"
 echo "  sudo journalctl -u pixflow-kiosk -f"
+echo "  sudo journalctl -u pixflow-debug-api -f"
