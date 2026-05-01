@@ -97,15 +97,11 @@ function StoppedScreen({ mode, pauseScreen }) {
     && pauseScreen?.status !== 'failed'
     && Boolean(pauseScreen?.mediaFile);
   if (isPauseMediaReady) {
-    const mediaClass = mode === 'preview' ? 'h-full w-full object-contain' : 'max-h-full max-w-full object-contain';
     if (pauseScreen.mediaType === 'video') {
-      return (
-        <div className={mode === 'preview' ? 'relative aspect-video w-full overflow-hidden rounded-xl border border-slate-700 bg-black' : 'relative flex h-screen w-screen items-center justify-center overflow-hidden bg-black'}>
-          <video src={pauseScreen.mediaFile} autoPlay muted loop playsInline preload="auto" controls={mode === 'preview'} className={mediaClass} />
-        </div>
-      );
+      return <StoppedVideo mode={mode} src={pauseScreen.mediaFile} />;
     }
     if (pauseScreen.mediaType === 'image') {
+      const mediaClass = mode === 'preview' ? 'h-full w-full object-contain' : 'max-h-full max-w-full object-contain';
       return (
         <div className={mode === 'preview' ? 'relative aspect-video w-full overflow-hidden rounded-xl border border-slate-700 bg-black' : 'relative flex h-screen w-screen items-center justify-center overflow-hidden bg-black'}>
           <img src={pauseScreen.mediaFile} alt="" className={mediaClass} draggable={false} />
@@ -114,6 +110,69 @@ function StoppedScreen({ mode, pauseScreen }) {
     }
   }
   return <StateView mode={mode} title='PixFlow' subtitle='Kiosk stopped' />;
+}
+
+function StoppedVideo({ mode, src }) {
+  const videoRef = React.useRef(null);
+  const [isReady, setIsReady] = React.useState(false);
+  const [hasError, setHasError] = React.useState(false);
+
+  React.useEffect(() => {
+    setIsReady(false);
+    setHasError(false);
+
+    const video = videoRef.current;
+    if (!video || !src) return;
+
+    console.log('[PixFlow] Pause screen video src:', src);
+    video.muted = true;
+    video.playsInline = true;
+    video.load();
+
+    const playPromise = video.play();
+    if (playPromise?.catch) {
+      playPromise.catch((error) => {
+        console.warn('[PixFlow] Pause screen video autoplay failed:', error);
+      });
+    }
+  }, [src]);
+
+  if (hasError) {
+    return <StateView mode={mode} title='PixFlow' subtitle='Erreur vidéo écran de pause' />;
+  }
+
+  return (
+    <div className={mode === 'preview' ? 'relative aspect-video w-full overflow-hidden rounded-xl border border-slate-700 bg-black' : 'relative flex h-screen w-screen items-center justify-center overflow-hidden bg-black'}>
+      <video
+        ref={videoRef}
+        key={src}
+        src={src}
+        autoPlay
+        muted
+        loop
+        playsInline
+        preload='auto'
+        controls={mode === 'preview'}
+        className={mode === 'preview' ? 'h-full w-full object-contain' : 'max-h-full max-w-full object-contain'}
+        onLoadedData={() => setIsReady(true)}
+        onCanPlay={() => {
+          setIsReady(true);
+          const playPromise = videoRef.current?.play?.();
+          if (playPromise?.catch) playPromise.catch(() => {});
+        }}
+        onPlaying={() => setIsReady(true)}
+        onError={() => {
+          console.warn('[PixFlow] Pause screen video error:', src);
+          setHasError(true);
+        }}
+      />
+      {!isReady && (
+        <div className='absolute inset-0 flex items-center justify-center bg-black text-slate-300'>
+          <p className='text-sm md:text-base'>Chargement de l’écran de pause…</p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function StateView({ mode, title, subtitle }) {

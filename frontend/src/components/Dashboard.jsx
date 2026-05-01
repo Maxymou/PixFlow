@@ -17,6 +17,7 @@ export function Dashboard({ projects, onRefresh }) {
   const [busyProjectIds, setBusyProjectIds] = useState(new Set());
   const [kioskStatus, setKioskStatus] = useState({ online: false, status: 'offline', message: 'No kiosk heartbeat received', lastSeenAt: null });
   const [playlist, setPlaylist] = useState([]);
+  const [pauseScreen, setPauseScreen] = useState(null);
   const [kioskCommandLoading, setKioskCommandLoading] = useState(false);
 
   const activeCount = projects.filter((p) => p.active).length;
@@ -29,10 +30,11 @@ export function Dashboard({ projects, onRefresh }) {
     let active = true;
     const fetchData = async () => {
       try {
-        const [statusPayload, playlistPayload] = await Promise.all([api('/api/kiosk/status'), api('/api/playlist')]);
+        const [statusPayload, playlistPayload, settingsPayload] = await Promise.all([api('/api/kiosk/status'), api('/api/playlist'), api('/api/settings')]);
         if (!active) return;
         setKioskStatus(statusPayload);
         setPlaylist(Array.isArray(playlistPayload) ? playlistPayload : []);
+        setPauseScreen(settingsPayload?.pauseScreen || null);
       } catch {
         if (!active) return;
         setKioskStatus((current) => ({ ...current, online: false, status: 'offline', message: 'Kiosk status unavailable' }));
@@ -54,7 +56,7 @@ export function Dashboard({ projects, onRefresh }) {
   return <div className="animate-slide-up space-y-6">{/* unchanged below */}
       <div className="card border-slate-800/90"><div className="mb-4 flex items-center justify-between"><p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Projects overview</p></div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start"><div className="space-y-2"><div className="flex items-center justify-end gap-2">{kioskStatus.online === false && (<span className="rounded-full border border-rose-500/40 bg-rose-500/15 px-2 py-0.5 text-xs text-rose-300">Offline</span>)}</div>
-      <PlayerRenderer mode="preview" media={previewMedia} mediaUrl={toMediaUrl(previewMedia)} kioskState={kioskStatus.status} offline={kioskIsOffline} paused={kioskStatus.status === 'paused'} isVideoLoading={kioskStatus.status === 'loading'} videoLoadMessage="Loading" />
+      <PlayerRenderer mode="preview" media={previewMedia} mediaUrl={toMediaUrl(previewMedia)} kioskState={kioskStatus.status} offline={kioskIsOffline} paused={kioskStatus.status === 'paused'} isVideoLoading={kioskStatus.status === 'loading'} videoLoadMessage="Loading" pauseScreen={pauseScreen} />
       </div>
       <div className="space-y-3 sm:w-44"><div className="kiosk-control-row"><div className={`kiosk-play-container ${pausePlayCommand === 'pause' ? 'is-playing' : ''} ${kioskCommandLoading ? 'is-loading' : ''}`}><button type="button" disabled={kioskIsOffline || kioskCommandLoading} onClick={() => sendKioskCommand(pausePlayCommand)} className="kiosk-play-btn" aria-label={pausePlayLabel} title={pausePlayLabel}><span className="kiosk-play-icon" aria-hidden="true" /><span className="kiosk-pause-icon" aria-hidden="true" /></button></div><div className={`kiosk-stop-container ${kioskCommandLoading ? 'is-loading' : ''}`}><button type="button" disabled={kioskIsOffline || kioskCommandLoading} onClick={() => sendKioskCommand('stop')} className="kiosk-stop-btn" aria-label="Arrêter" title="Arrêter"><span className="kiosk-stop-icon" aria-hidden="true" /></button></div></div>
       <div className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm"><div className="flex items-center justify-between text-slate-300"><span>Total</span><span className="font-semibold text-slate-100">{projects.length}</span></div><div className="mt-1 flex items-center justify-between text-emerald-300"><span>Active</span><span className="font-semibold text-emerald-200">{activeCount}</span></div><div className="mt-1 flex items-center justify-between text-slate-400"><span>Inactive</span><span className="font-semibold text-slate-300">{inactiveCount}</span></div></div></div></div></div>
