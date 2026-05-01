@@ -97,7 +97,7 @@ function StoppedScreen({ mode, pauseScreen }) {
     if (pauseScreen.mediaType === 'video') {
       return (
         <div className={mode === 'preview' ? 'relative aspect-video w-full overflow-hidden rounded-xl border border-slate-700 bg-black' : 'relative flex h-screen w-screen items-center justify-center overflow-hidden bg-black'}>
-          <video src={pauseScreen.mediaFile} autoPlay muted loop playsInline preload="auto" controls className={mediaClass} />
+          <video src={pauseScreen.mediaFile} autoPlay muted loop playsInline preload="auto" controls={mode === 'preview'} className={mediaClass} />
         </div>
       );
     }
