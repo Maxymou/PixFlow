@@ -1,4 +1,12 @@
 import React from 'react';
+import { API_BASE } from '../api';
+
+const resolveMediaUrl = (file) => {
+  if (!file) return null;
+  if (/^https?:\/\//i.test(file)) return file;
+  if (file.startsWith('/')) return `${API_BASE}${file}`;
+  return `${API_BASE}/media/${file}`;
+};
 
 export function PlayerRenderer({
   mode = 'kiosk',
@@ -96,15 +104,16 @@ function StoppedScreen({ mode, pauseScreen }) {
     && pauseScreen?.status !== 'processing'
     && pauseScreen?.status !== 'failed'
     && Boolean(pauseScreen?.mediaFile);
+  const pauseMediaUrl = resolveMediaUrl(pauseScreen?.mediaFile);
   if (isPauseMediaReady) {
     if (pauseScreen.mediaType === 'video') {
-      return <StoppedVideo mode={mode} src={pauseScreen.mediaFile} />;
+      return <StoppedVideo mode={mode} src={pauseMediaUrl} />;
     }
     if (pauseScreen.mediaType === 'image') {
       const mediaClass = mode === 'preview' ? 'h-full w-full object-contain' : 'max-h-full max-w-full object-contain';
       return (
         <div className={mode === 'preview' ? 'relative aspect-video w-full overflow-hidden rounded-xl border border-slate-700 bg-black' : 'relative flex h-screen w-screen items-center justify-center overflow-hidden bg-black'}>
-          <img src={pauseScreen.mediaFile} alt="" className={mediaClass} draggable={false} />
+          <img src={pauseMediaUrl} alt="" className={mediaClass} draggable={false} />
         </div>
       );
     }
@@ -124,17 +133,57 @@ function StoppedVideo({ mode, src }) {
     const video = videoRef.current;
     if (!video || !src) return;
 
-    console.log('[PixFlow] Pause screen video src:', src);
+    console.log('[PixFlow] Pause screen video resolved src:', src);
     video.muted = true;
+    video.defaultMuted = true;
     video.playsInline = true;
+    video.loop = true;
+    video.src = src;
     video.load();
 
-    const playPromise = video.play();
-    if (playPromise?.catch) {
-      playPromise.catch((error) => {
-        console.warn('[PixFlow] Pause screen video autoplay failed:', error);
+    const tryPlay = () => {
+      const playPromise = video.play();
+      if (playPromise?.catch) {
+        playPromise.catch((error) => {
+          console.warn('[PixFlow] Pause screen video autoplay failed:', error);
+        });
+      }
+    };
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(tryPlay);
+    });
+  }, [src]);
+
+  React.useEffect(() => {
+    if (!src) return;
+
+    const timeout = setTimeout(() => {
+      const video = videoRef.current;
+      if (!video) return;
+
+      if (video.readyState >= 2) {
+        setIsReady(true);
+        const playPromise = video.play();
+        if (playPromise?.catch) playPromise.catch(() => {});
+        return;
+      }
+
+      console.warn('[PixFlow] Pause screen video timeout waiting for readiness', {
+        src,
+        readyState: video.readyState,
+        networkState: video.networkState,
+        currentSrc: video.currentSrc,
+        error: video.error ? {
+          code: video.error.code,
+          message: video.error.message,
+        } : null,
       });
-    }
+
+      setHasError(true);
+    }, 10000);
+
+    return () => clearTimeout(timeout);
   }, [src]);
 
   if (hasError) {
@@ -154,15 +203,35 @@ function StoppedVideo({ mode, src }) {
         preload='auto'
         controls={mode === 'preview'}
         className={mode === 'preview' ? 'h-full w-full object-contain' : 'max-h-full max-w-full object-contain'}
-        onLoadedData={() => setIsReady(true)}
+        onLoadStart={() => console.log('[PixFlow] Pause screen video loadstart')}
+        onLoadedMetadata={() => console.log('[PixFlow] Pause screen video loadedmetadata')}
+        onLoadedData={() => {
+          console.log('[PixFlow] Pause screen video loadeddata');
+          setIsReady(true);
+        }}
         onCanPlay={() => {
+          console.log('[PixFlow] Pause screen video canplay');
           setIsReady(true);
           const playPromise = videoRef.current?.play?.();
-          if (playPromise?.catch) playPromise.catch(() => {});
+          if (playPromise?.catch) playPromise.catch((error) => {
+            console.warn('[PixFlow] Pause screen video play failed on canplay:', error);
+          });
         }}
-        onPlaying={() => setIsReady(true)}
+        onPlaying={() => {
+          console.log('[PixFlow] Pause screen video playing');
+          setIsReady(true);
+        }}
+        onWaiting={() => console.log('[PixFlow] Pause screen video waiting')}
+        onStalled={() => console.warn('[PixFlow] Pause screen video stalled')}
         onError={() => {
-          console.warn('[PixFlow] Pause screen video error:', src);
+          const video = videoRef.current;
+          console.warn('[PixFlow] Pause screen video error:', {
+            src,
+            error: video?.error ? {
+              code: video.error.code,
+              message: video.error.message,
+            } : null,
+          });
           setHasError(true);
         }}
       />

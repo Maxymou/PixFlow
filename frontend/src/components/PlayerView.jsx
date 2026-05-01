@@ -17,6 +17,13 @@ const toMediaUrl = (item) => {
   return `${API_BASE}/media/${item.file}`;
 };
 
+const toPauseMediaUrl = (file) => {
+  if (!file) return null;
+  if (/^https?:\/\//i.test(file)) return file;
+  if (file.startsWith('/')) return `${API_BASE}${file}`;
+  return `${API_BASE}/media/${file}`;
+};
+
 export function PlayerView() {
   const [playlist, setPlaylist] = useState([]);
   const [index, setIndex] = useState(0);
@@ -194,10 +201,12 @@ export function PlayerView() {
     if (!pauseScreen || pauseScreen.mode !== 'custom') return undefined;
     if (pauseScreen.status && pauseScreen.status !== 'ready') return undefined;
     if (!pauseScreen.mediaFile) return undefined;
+    const pauseMediaUrl = toPauseMediaUrl(pauseScreen.mediaFile);
+    if (!pauseMediaUrl) return undefined;
 
     if (pauseScreen.mediaType === 'image') {
       const img = new Image();
-      img.src = pauseScreen.mediaFile;
+      img.src = pauseMediaUrl;
       pausePreloadImageRef.current = img;
       if (pausePreloadVideoRef.current) {
         pausePreloadVideoRef.current.pause();
@@ -209,7 +218,7 @@ export function PlayerView() {
     }
 
     if (pauseScreen.mediaType === 'video') {
-      console.log('[PixFlow kiosk] Preloading pause screen video:', pauseScreen.mediaFile);
+      console.log('[PixFlow kiosk] Preloading pause screen video:', pauseMediaUrl);
       if (pausePreloadImageRef.current) {
         pausePreloadImageRef.current = null;
       }
@@ -218,7 +227,7 @@ export function PlayerView() {
       video.preload = 'auto';
       video.muted = true;
       video.playsInline = true;
-      video.src = pauseScreen.mediaFile;
+      video.src = pauseMediaUrl;
 
       video.onloadeddata = () => console.log('[PixFlow kiosk] Pause screen video loadeddata');
       video.oncanplay = () => console.log('[PixFlow kiosk] Pause screen video canplay');
