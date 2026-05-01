@@ -987,6 +987,7 @@ const updatePauseScreenMode = async (req, res, next) => {
 };
 
 const uploadPauseScreenMedia = async (req, res, next) => {
+  let inputPath = null;
   try {
     if (!req.file) return res.status(400).json({ error: 'file is required' });
 
@@ -995,13 +996,24 @@ const uploadPauseScreenMedia = async (req, res, next) => {
       return res.status(400).json({ error: 'file must be image or video' });
     }
 
-    await clearPauseScreenFiles();
+    inputPath = path.join(incomingDir, req.file.filename);
+    let finalName;
 
-    const ext = path.extname(req.file.originalname || req.file.filename).toLowerCase();
-    const finalName = `pause-screen-${nanoid()}${ext || '.bin'}`;
-    const inputPath = path.join(incomingDir, req.file.filename);
-    const finalPath = path.join(pauseScreenDir, finalName);
-    await fs.rename(inputPath, finalPath);
+    if (mediaType === 'video') {
+      finalName = `pause-screen-${nanoid()}.mp4`;
+      const outputPath = path.join(pauseScreenDir, finalName);
+      await clearPauseScreenFiles();
+      await runFfmpeg(inputPath, outputPath);
+      await fs.rm(inputPath, { force: true });
+      inputPath = null;
+    } else {
+      await clearPauseScreenFiles();
+      const ext = path.extname(req.file.originalname || req.file.filename).toLowerCase();
+      finalName = `pause-screen-${nanoid()}${ext || '.bin'}`;
+      const finalPath = path.join(pauseScreenDir, finalName);
+      await fs.rename(inputPath, finalPath);
+      inputPath = null;
+    }
 
     const settings = await readJson(settingsFile);
     settings.pauseScreen = {
@@ -1012,7 +1024,13 @@ const uploadPauseScreenMedia = async (req, res, next) => {
     await writeJson(settingsFile, settings);
 
     res.status(201).json(await buildSettingsResponse());
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  } finally {
+    if (inputPath) {
+      await fs.rm(inputPath, { force: true }).catch(() => {});
+    }
+  }
 };
 
 app.patch('/settings/pause-screen', updatePauseScreenMode);
