@@ -104,6 +104,10 @@ export function UserMenu({ open, onClose }) {
   const [debugSystemError, setDebugSystemError] = useState('');
   const [copyStatus, setCopyStatus] = useState('');
   const [isDebugNetworkLoading, setIsDebugNetworkLoading] = useState(false);
+  const [debugPixflowStatus, setDebugPixflowStatus] = useState(null);
+  const [debugLogs, setDebugLogs] = useState('');
+  const [debugDiagnostic, setDebugDiagnostic] = useState([]);
+  const [debugStorage, setDebugStorage] = useState(null);
 
   useEffect(() => {
     if (!open) {
@@ -139,9 +143,15 @@ export function UserMenu({ open, onClose }) {
 
     const loadSystem = async () => {
       try {
-        const payload = await api('/api/debug/system');
+        const [payload, pixflowPayload, storagePayload] = await Promise.all([
+          api('/api/debug/system'),
+          api('/api/debug/pixflow-status').catch(() => null),
+          api('/api/debug/storage').catch(() => null),
+        ]);
         if (!cancelled) {
           setDebugSystem(payload || null);
+          setDebugPixflowStatus(pixflowPayload || null);
+          setDebugStorage(storagePayload || null);
           setDebugSystemError('');
         }
       } catch {
@@ -669,6 +679,25 @@ export function UserMenu({ open, onClose }) {
     }
   };
 
+  const fetchLogs = async (target) => {
+    try {
+      const payload = await api(`/api/debug/logs?target=${encodeURIComponent(target)}`);
+      const lines = Array.isArray(payload?.lines) ? payload.lines.join('\n') : (payload?.stdout || payload?.message || '');
+      setDebugLogs(lines);
+    } catch (error) {
+      setDebugLogs(parseApiError(error));
+    }
+  };
+
+  const runDiagnostic = async () => {
+    try {
+      const payload = await api('/api/debug/diagnostic');
+      setDebugDiagnostic(Array.isArray(payload?.checks) ? payload.checks : []);
+    } catch (error) {
+      setDebugDiagnostic([{ label: 'Diagnostic', status: 'error', message: parseApiError(error) }]);
+    }
+  };
+
 
   if (!open) return null;
 
@@ -693,7 +722,7 @@ export function UserMenu({ open, onClose }) {
                 <p className="text-sm text-slate-400">Configuration locale</p>
               </div>
               <div className="flex flex-1 flex-col">
-                <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5 md:px-6">
+                <div className="flex-1 space-y-5 overflow-y-auto overscroll-contain touch-pan-y px-4 py-5 md:px-6">
                   <button
                     type="button"
                     onClick={() => setActivePanel('hotspot')}
@@ -759,7 +788,7 @@ export function UserMenu({ open, onClose }) {
                 <p className="text-sm text-slate-400">Réglages du réseau local</p>
               </div>
 
-              <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5 md:px-6">
+              <div className="flex-1 space-y-5 overflow-y-auto overscroll-contain touch-pan-y px-4 py-5 md:px-6">
                 <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/50 px-3 py-2.5">
                   <div>
                     <p className="text-sm text-slate-200">Hotspot Wi-Fi</p>
@@ -853,7 +882,7 @@ export function UserMenu({ open, onClose }) {
                 <h2 className="text-lg font-semibold text-slate-100">Écran de pause</h2>
                 <p className="text-sm text-slate-400">Contenu affiché quand le kiosque est arrêté</p>
               </div>
-              <div className="flex-1 space-y-4 overflow-y-auto px-4 py-5 md:px-6">
+              <div className="flex-1 space-y-4 overflow-y-auto overscroll-contain touch-pan-y px-4 py-5 md:px-6">
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 text-sm text-slate-200"><input type="radio" name="pauseMode" checked={pauseScreenDraft.mode === 'default'} onChange={() => setPauseScreenDraft((prev) => ({ ...prev, mode: 'default' }))} /> Par défaut</label>
                   <label className="flex items-center gap-2 text-sm text-slate-200"><input type="radio" name="pauseMode" checked={pauseScreenDraft.mode === 'custom'} onChange={() => setPauseScreenDraft((prev) => ({ ...prev, mode: 'custom' }))} /> Personnaliser</label>
@@ -898,8 +927,8 @@ export function UserMenu({ open, onClose }) {
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="shrink-0 border-b border-slate-800 px-4 py-4 md:px-6">
                 <button type="button" onClick={() => setActivePanel('main')} className="mb-2 text-sm text-slate-300 transition hover:text-slate-100">&lt; Retour</button>
-                <h2 className="text-lg font-semibold text-slate-100">Débug</h2>
-                <p className="text-sm text-slate-400">Commandes système Raspberry</p>
+                <h2 className="text-lg font-semibold text-slate-100">Débug PixFlow</h2>
+                <p className="text-sm text-slate-400">Tableau de bord Raspberry Pi / PixFlow</p>
               </div>
               <div
                 className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y px-4 py-5 pb-8 md:px-6"
@@ -929,6 +958,38 @@ export function UserMenu({ open, onClose }) {
                     </div>
                   )}
                 </div>
+                <details className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-slate-100" open>
+                  <summary className="cursor-pointer text-sm font-medium text-indigo-300">État PixFlow</summary>
+                  <div className="mt-2 space-y-1 text-xs">
+                    <p>Backend : {debugPixflowStatus?.backend || '—'}</p>
+                    <p>Kiosk : {debugPixflowStatus?.kiosk?.status || '—'}</p>
+                    <p>Hotspot : {debugPixflowStatus?.hotspot?.status || '—'}</p>
+                    <p>Docker : {debugPixflowStatus?.docker?.status || '—'}</p>
+                    <p>Projet actif : {debugPixflowStatus?.activeProject?.name || '—'}</p>
+                  </div>
+                </details>
+                <details className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-slate-100">
+                  <summary className="cursor-pointer text-sm font-medium text-indigo-300">Logs</summary>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {['backend', 'kiosk', 'hotspot', 'docker', 'system'].map((target) => (
+                      <button key={target} type="button" onClick={() => fetchLogs(target)} className="rounded border border-slate-700 px-2 py-1 text-xs">{target}</button>
+                    ))}
+                  </div>
+                  <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded border border-slate-800 bg-black/60 p-2 text-xs">{debugLogs || 'Aucun log chargé'}</pre>
+                </details>
+                <details className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-slate-100">
+                  <summary className="cursor-pointer text-sm font-medium text-indigo-300">Diagnostic automatique</summary>
+                  <button type="button" onClick={runDiagnostic} className="mt-2 rounded border border-slate-700 px-3 py-1 text-xs">Lancer un diagnostic</button>
+                  <div className="mt-2 space-y-1 text-xs">
+                    {debugDiagnostic.map((item, idx) => (
+                      <p key={`${item.label}-${idx}`}>{item.status === 'ok' ? '✅' : item.status === 'warning' ? '⚠️' : item.status === 'error' ? '❌' : '•'} {item.label}: {item.message}</p>
+                    ))}
+                  </div>
+                </details>
+                <details className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-slate-100">
+                  <summary className="cursor-pointer text-sm font-medium text-indigo-300">Stockage médias</summary>
+                  <p className="mt-2 text-xs">{debugStorage?.message || 'Données de stockage indisponibles'}</p>
+                </details>
 
                 <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">Attention : ces commandes sont exécutées sur le Raspberry Pi. Une mauvaise commande peut bloquer PixFlow.</div>
 

@@ -1400,6 +1400,71 @@ app.get(['/api/debug/system', '/debug/system'], async (_req, res) => {
   }
 });
 
+
+
+app.get(['/api/debug/pixflow-status', '/debug/pixflow-status'], async (_req, res) => {
+  try {
+    if (debugHostApiUrl) {
+      const payload = await callDebugHostApi('/pixflow-status');
+      return res.json(payload || {});
+    }
+    return res.json({
+      backend: 'online',
+      frontend: 'online',
+      kiosk: latestKioskStatus?.state ? { status: latestKioskStatus.state, service: 'pixflow-kiosk' } : { status: 'unknown', service: 'pixflow-kiosk' },
+      hotspot: { status: hotspotEnabledRuntime ? 'active' : 'inactive' },
+      docker: { status: 'unknown', containers: [] },
+      activeProject: null,
+    });
+  } catch (error) {
+    return res.status(error.status || 503).json(error.payload || { ok: false, error: 'status_unavailable' });
+  }
+});
+
+app.get(['/api/debug/logs', '/debug/logs'], async (req, res) => {
+  const target = typeof req.query?.target === 'string' ? req.query.target : 'backend';
+  const allowed = new Set(['backend', 'kiosk', 'hotspot', 'docker', 'system']);
+  if (!allowed.has(target)) return res.status(400).json({ ok: false, error: 'target invalide' });
+  try {
+    if (debugHostApiUrl) {
+      const payload = await callDebugHostApi(`/logs?target=${encodeURIComponent(target)}`);
+      return res.json(payload || {});
+    }
+    return res.json({ ok: true, target, lines: ['Logs indisponibles sans pixflow-debug-api.'] });
+  } catch (error) {
+    return res.status(error.status || 503).json(error.payload || { ok: false, error: 'logs_unavailable', target, lines: [] });
+  }
+});
+
+app.get(['/api/debug/diagnostic', '/debug/diagnostic'], async (_req, res) => {
+  try {
+    if (debugHostApiUrl) {
+      const payload = await callDebugHostApi('/diagnostic');
+      return res.json(payload || {});
+    }
+    const checks = [
+      { label: 'Backend', status: 'ok', message: 'Backend en ligne' },
+      { label: 'Kiosk', status: latestKioskStatus?.state ? 'ok' : 'unknown', message: latestKioskStatus?.state ? `État: ${latestKioskStatus.state}` : 'État kiosk inconnu' },
+      { label: 'Hotspot', status: hotspotEnabledRuntime ? 'ok' : 'warning', message: hotspotEnabledRuntime ? 'Hotspot actif' : 'Hotspot inactif' },
+    ];
+    return res.json({ checks });
+  } catch (error) {
+    return res.status(error.status || 503).json(error.payload || { checks: [] });
+  }
+});
+
+app.get(['/api/debug/storage', '/debug/storage'], async (_req, res) => {
+  try {
+    if (debugHostApiUrl) {
+      const payload = await callDebugHostApi('/storage');
+      return res.json(payload || {});
+    }
+    return res.json({ ok: true, disk: null, media: null, message: 'Stockage détaillé indisponible sans pixflow-debug-api.' });
+  } catch (error) {
+    return res.status(error.status || 503).json(error.payload || { ok: false, error: 'storage_unavailable' });
+  }
+});
+
 app.patch(['/api/debug/commands/:id', '/debug/commands/:id'], async (req, res) => {
   try {
     const id = typeof req.params?.id === 'string' ? req.params.id.trim() : '';
