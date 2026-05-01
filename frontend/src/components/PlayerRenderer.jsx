@@ -125,6 +125,22 @@ function StoppedVideo({ mode, src }) {
   const videoRef = React.useRef(null);
   const [isReady, setIsReady] = React.useState(false);
   const [hasError, setHasError] = React.useState(false);
+  const isKiosk = mode === 'kiosk';
+
+  const getVideoDiagnostics = React.useCallback((video) => ({
+    src,
+    readyState: video?.readyState,
+    networkState: video?.networkState,
+    paused: video?.paused,
+    currentTime: video?.currentTime,
+    videoWidth: video?.videoWidth,
+    videoHeight: video?.videoHeight,
+    currentSrc: video?.currentSrc,
+    error: video?.error ? {
+      code: video.error.code,
+      message: video.error.message,
+    } : null,
+  }), [src]);
 
   React.useEffect(() => {
     setIsReady(false);
@@ -138,20 +154,47 @@ function StoppedVideo({ mode, src }) {
     video.defaultMuted = true;
     video.playsInline = true;
     video.loop = true;
+    video.setAttribute('muted', '');
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    video.load();
 
-    const tryPlay = () => {
+    const tryPlay = (reason) => {
       const playPromise = video.play();
       if (playPromise?.catch) {
         playPromise.catch((error) => {
-          console.warn('[PixFlow] Pause screen video autoplay failed:', error);
+          console.warn(`[PixFlow] Pause screen video play failed (${reason}):`, error, getVideoDiagnostics(video));
         });
       }
     };
 
+    const onLoadedData = () => {
+      console.log('[PixFlow] Pause screen video loadeddata (listener)', getVideoDiagnostics(video));
+      setIsReady(true);
+      tryPlay('loadeddata');
+    };
+    const onCanPlay = () => {
+      console.log('[PixFlow] Pause screen video canplay (listener)', getVideoDiagnostics(video));
+      setIsReady(true);
+      tryPlay('canplay');
+    };
+
+    video.addEventListener('loadeddata', onLoadedData);
+    video.addEventListener('canplay', onCanPlay);
+
     requestAnimationFrame(() => {
-      requestAnimationFrame(tryPlay);
+      requestAnimationFrame(() => tryPlay('double-raf'));
     });
-  }, [src]);
+    const fallback500 = setTimeout(() => tryPlay('timeout-500ms'), 500);
+    const fallback1500 = setTimeout(() => tryPlay('timeout-1500ms'), 1500);
+
+    return () => {
+      clearTimeout(fallback500);
+      clearTimeout(fallback1500);
+      video.removeEventListener('loadeddata', onLoadedData);
+      video.removeEventListener('canplay', onCanPlay);
+    };
+  }, [getVideoDiagnostics, src]);
 
   React.useEffect(() => {
     if (!src) return;
@@ -160,34 +203,29 @@ function StoppedVideo({ mode, src }) {
       const video = videoRef.current;
       if (!video) return;
 
-      if (video.readyState >= 1) {
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
         setIsReady(true);
         const playPromise = video.play();
-        if (playPromise?.catch) playPromise.catch(() => {});
+        if (playPromise?.catch) {
+          playPromise.catch((error) => {
+            console.warn('[PixFlow] Pause screen video play failed after 10s ready fallback:', error, getVideoDiagnostics(video));
+          });
+        }
         return;
       }
 
-      console.warn('[PixFlow] Pause screen video timeout waiting for readiness', {
-        src,
-        readyState: video.readyState,
-        networkState: video.networkState,
-        currentSrc: video.currentSrc,
-        error: video.error ? {
-          code: video.error.code,
-          message: video.error.message,
-        } : null,
-      });
+      console.warn('[PixFlow] Pause screen video timeout waiting for readiness', getVideoDiagnostics(video));
 
       // Keep kiosk rendering tolerant to slow loads:
       // only mark as error when the browser reports a terminal failure,
       // not when it is still loading data.
-      if (video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE) {
+      if (video.error || video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE) {
         setHasError(true);
       }
     }, 10000);
 
     return () => clearTimeout(timeout);
-  }, [src]);
+  }, [getVideoDiagnostics, src]);
 
   if (hasError) {
     return <StateView mode={mode} title='PixFlow' subtitle='Erreur vidéo écran de pause' />;
@@ -208,40 +246,37 @@ function StoppedVideo({ mode, src }) {
         className={mode === 'preview' ? 'h-full w-full object-contain' : 'h-screen w-screen object-contain'}
         onLoadStart={() => console.log('[PixFlow] Pause screen video loadstart')}
         onLoadedMetadata={() => {
-          console.log('[PixFlow] Pause screen video loadedmetadata');
-          setIsReady(true);
+          const video = videoRef.current;
+          console.log('[PixFlow] Pause screen video loadedmetadata', getVideoDiagnostics(video));
         }}
         onLoadedData={() => {
-          console.log('[PixFlow] Pause screen video loadeddata');
+          const video = videoRef.current;
+          console.log('[PixFlow] Pause screen video loadeddata', getVideoDiagnostics(video));
           setIsReady(true);
         }}
         onCanPlay={() => {
-          console.log('[PixFlow] Pause screen video canplay');
+          const video = videoRef.current;
+          console.log('[PixFlow] Pause screen video canplay', getVideoDiagnostics(video));
           setIsReady(true);
           const playPromise = videoRef.current?.play?.();
           if (playPromise?.catch) playPromise.catch((error) => {
-            console.warn('[PixFlow] Pause screen video play failed on canplay:', error);
+            console.warn('[PixFlow] Pause screen video play failed on canplay:', error, getVideoDiagnostics(videoRef.current));
           });
         }}
         onPlaying={() => {
-          console.log('[PixFlow] Pause screen video playing');
+          const video = videoRef.current;
+          console.log('[PixFlow] Pause screen video playing', getVideoDiagnostics(video));
           setIsReady(true);
         }}
-        onWaiting={() => console.log('[PixFlow] Pause screen video waiting')}
-        onStalled={() => console.warn('[PixFlow] Pause screen video stalled')}
+        onWaiting={() => console.log('[PixFlow] Pause screen video waiting', getVideoDiagnostics(videoRef.current))}
+        onStalled={() => console.warn('[PixFlow] Pause screen video stalled', getVideoDiagnostics(videoRef.current))}
         onError={() => {
           const video = videoRef.current;
-          console.warn('[PixFlow] Pause screen video error:', {
-            src,
-            error: video?.error ? {
-              code: video.error.code,
-              message: video.error.message,
-            } : null,
-          });
+          console.warn('[PixFlow] Pause screen video error:', getVideoDiagnostics(video));
           setHasError(true);
         }}
       />
-      {mode === 'preview' && !isReady && (
+      {(isKiosk || mode === 'preview') && !isReady && (
         <div className='absolute inset-0 flex items-center justify-center bg-black/80 text-slate-300'>
           <p className='text-sm md:text-base'>Chargement de l’écran de pause…</p>
         </div>
