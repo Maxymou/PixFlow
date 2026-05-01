@@ -71,6 +71,7 @@ export function UserMenu({ open, onClose }) {
   const [isPauseSaving, setIsPauseSaving] = useState(false);
   const [pauseUploadProgress, setPauseUploadProgress] = useState(0);
   const [pauseUploadPhase, setPauseUploadPhase] = useState('idle');
+  const [isPauseAutoUploading, setIsPauseAutoUploading] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -124,6 +125,19 @@ export function UserMenu({ open, onClose }) {
         setPauseScreenDraft(resolvedPauseScreen);
         setPausePreviewUrl(resolvedPauseScreen.mediaFile || '');
         setPauseUploadFile(null);
+        if (resolvedPauseScreen.status === 'processing') {
+          setPauseUploadPhase('processing');
+          setPauseUploadProgress(Number(resolvedPauseScreen.progress) || 0);
+        } else if (resolvedPauseScreen.status === 'ready' && resolvedPauseScreen.mediaFile) {
+          setPauseUploadPhase('ready');
+          setPauseUploadProgress(100);
+        } else if (resolvedPauseScreen.status === 'failed') {
+          setPauseUploadPhase('failed');
+          setPauseUploadProgress(0);
+        } else {
+          setPauseUploadPhase('idle');
+          setPauseUploadProgress(0);
+        }
       } catch (error) {
         if (!mounted) return;
         setStatusMessage('');
@@ -235,15 +249,89 @@ export function UserMenu({ open, onClose }) {
       setIsSaving(false);
     }
   };
+  const uploadSelectedPauseScreenFile = async (file) => {
+    const isVideo = file.type.startsWith('video/');
+    setStatusMessage('');
+    setErrorMessage('');
+    setIsPauseAutoUploading(true);
+    setPauseUploadPhase('uploading');
+    setPauseUploadProgress(0);
+
+    try {
+      const updated = await uploadPauseScreenFile(file, setPauseUploadProgress);
+      const nextPauseScreen = {
+        ...DEFAULT_PAUSE_SCREEN,
+        ...(updated?.pauseScreen || {}),
+      };
+
+      setPauseScreen(nextPauseScreen);
+      setPauseScreenDraft(nextPauseScreen);
+      setPausePreviewUrl(nextPauseScreen.mediaFile || '');
+
+      if (isVideo && nextPauseScreen.status === 'processing') {
+        setPauseUploadPhase('processing');
+
+        let done = false;
+        while (!done) {
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+
+          const polled = await api('/api/settings');
+          const polledPause = {
+            ...DEFAULT_PAUSE_SCREEN,
+            ...(polled?.pauseScreen || {}),
+          };
+
+          setPauseScreen(polledPause);
+          setPauseScreenDraft(polledPause);
+          setPauseUploadProgress(Math.max(0, Math.min(100, Number(polledPause.progress) || 0)));
+
+          if (polledPause.status === 'ready') {
+            setPauseUploadPhase('ready');
+            setPauseUploadProgress(100);
+            setPausePreviewUrl(polledPause.mediaFile || '');
+            done = true;
+          } else if (polledPause.status === 'failed') {
+            setPauseUploadPhase('failed');
+            throw new Error(polledPause.error || 'La conversion vidéo a échoué.');
+          }
+        }
+      } else {
+        setPauseUploadPhase('ready');
+        setPauseUploadProgress(100);
+      }
+
+      setPauseUploadFile(null);
+      setStatusMessage(isVideo ? 'Vidéo prête.' : 'Image prête.');
+    } catch (error) {
+      setPauseUploadPhase('failed');
+      setErrorMessage(parseApiError(error));
+    } finally {
+      setIsPauseAutoUploading(false);
+    }
+  };
+
   const handlePauseScreenFileChange = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    const isVideo = file.type.startsWith('video/');
+
     setPauseUploadFile(file);
-    if (file.type.startsWith('video/')) setPausePreviewUrl('');
-    else setPausePreviewUrl(URL.createObjectURL(file));
-    setPauseScreenDraft((prev) => ({ ...prev, mode: 'custom', mediaType: file.type.startsWith('video/') ? 'video' : 'image' }));
-    setPauseUploadPhase('idle');
+    setPausePreviewUrl(isVideo ? '' : URL.createObjectURL(file));
+    setPauseScreenDraft((prev) => ({
+      ...prev,
+      mode: 'custom',
+      mediaType: isVideo ? 'video' : 'image',
+      originalName: file.name,
+      status: 'uploading',
+      progress: 0,
+      error: null,
+    }));
+
+    setPauseUploadPhase('uploading');
     setPauseUploadProgress(0);
+
+    uploadSelectedPauseScreenFile(file);
   };
 
   const handlePauseScreenCancel = () => {
@@ -257,10 +345,16 @@ export function UserMenu({ open, onClose }) {
 
   const handlePauseScreenSave = async (event) => {
     event.preventDefault();
-    setIsPauseSaving(true);
     setStatusMessage('');
     setErrorMessage('');
+
+    if (pauseUploadPhase === 'uploading' || pauseUploadPhase === 'processing') {
+      setErrorMessage('La vidéo est encore en préparation.');
+      return;
+    }
+
     try {
+      setIsPauseSaving(true);
       if (pauseScreenDraft.mode === 'default') {
         const updated = await api('/api/settings/pause-screen', { method: 'PATCH', body: JSON.stringify({ mode: 'default' }) });
         const nextPauseScreen = { ...DEFAULT_PAUSE_SCREEN, ...(updated?.pauseScreen || {}) };
@@ -268,45 +362,17 @@ export function UserMenu({ open, onClose }) {
         setPauseScreenDraft(nextPauseScreen);
         setPausePreviewUrl('');
       } else {
-        if (pauseUploadFile) {
-          const isVideo = pauseUploadFile.type.startsWith('video/');
-          setPauseUploadPhase('uploading');
-          setPauseUploadProgress(0);
-          const updated = await uploadPauseScreenFile(pauseUploadFile, setPauseUploadProgress);
-          const nextPauseScreen = { ...DEFAULT_PAUSE_SCREEN, ...(updated?.pauseScreen || {}) };
-          setPauseScreen(nextPauseScreen);
-          setPauseScreenDraft(nextPauseScreen);
-          setPausePreviewUrl(nextPauseScreen.mediaFile || '');
-          setPauseUploadFile(null);
-          if (isVideo && nextPauseScreen.status === 'processing') {
-            setPauseUploadPhase('processing');
-            let done = false;
-            while (!done) {
-              await new Promise((resolve) => setTimeout(resolve, 1200));
-              const polled = await api('/api/settings');
-              const polledPause = { ...DEFAULT_PAUSE_SCREEN, ...(polled?.pauseScreen || {}) };
-              setPauseScreen(polledPause);
-              setPauseScreenDraft(polledPause);
-              setPauseUploadProgress(Math.max(0, Math.min(100, Number(polledPause.progress) || 0)));
-              if (polledPause.status === 'ready') {
-                setPauseUploadPhase('ready');
-                setPausePreviewUrl(polledPause.mediaFile || '');
-                done = true;
-              } else if (polledPause.status === 'failed') {
-                setPauseUploadPhase('failed');
-                throw new Error(polledPause.error || 'La conversion vidéo a échoué.');
-              }
-            }
-          } else {
-            setPauseUploadPhase('ready');
-          }
-        } else {
-          const updated = await api('/api/settings/pause-screen', { method: 'PATCH', body: JSON.stringify({ mode: 'custom' }) });
-          const nextPauseScreen = { ...DEFAULT_PAUSE_SCREEN, ...(updated?.pauseScreen || {}) };
-          setPauseScreen(nextPauseScreen);
-          setPauseScreenDraft(nextPauseScreen);
-          setPausePreviewUrl(nextPauseScreen.mediaFile || '');
+        const isReadyCustom = pauseScreenDraft.status === 'ready' && pauseScreenDraft.mediaFile;
+        if (!isReadyCustom) {
+          setErrorMessage('Sélectionnez d’abord une image ou une vidéo.');
+          return;
         }
+
+        const updated = await api('/api/settings/pause-screen', { method: 'PATCH', body: JSON.stringify({ mode: 'custom' }) });
+        const nextPauseScreen = { ...DEFAULT_PAUSE_SCREEN, ...(updated?.pauseScreen || {}) };
+        setPauseScreen(nextPauseScreen);
+        setPauseScreenDraft(nextPauseScreen);
+        setPausePreviewUrl(nextPauseScreen.mediaFile || '');
       }
       setStatusMessage('Écran de pause enregistré.');
       setActivePanel('main');
@@ -317,6 +383,19 @@ export function UserMenu({ open, onClose }) {
       setIsPauseSaving(false);
     }
   };
+
+  const pauseDisplayStatus = (() => {
+    if (pauseUploadPhase === 'uploading') return 'Upload en cours';
+    if (pauseUploadPhase === 'processing') return 'Conversion en cours';
+    if (pauseUploadPhase === 'failed') return 'Échec';
+
+    if (pauseScreenDraft.status === 'processing') return 'Conversion en cours';
+    if (pauseScreenDraft.status === 'failed') return 'Échec';
+    if (pauseScreenDraft.status === 'ready' && pauseScreenDraft.mediaFile) return 'Prête';
+
+    return 'Aucun fichier sélectionné';
+  })();
+
 
   if (!open) return null;
 
@@ -485,7 +564,7 @@ export function UserMenu({ open, onClose }) {
                         <p className="font-medium text-slate-100">Vidéo sélectionnée</p>
                         <p className="mt-1 text-xs text-slate-400">Nom : {pauseUploadFile?.name || pauseScreenDraft.originalName || 'vidéo'}</p>
                         <p className="mt-1 text-xs text-slate-400">
-                          Statut : {pauseUploadPhase === 'uploading' ? 'Upload en cours' : pauseUploadPhase === 'processing' ? 'Conversion en cours' : pauseUploadPhase === 'ready' ? 'Prête' : pauseUploadPhase === 'failed' ? 'Échec' : 'En attente'}
+                          Statut : {pauseDisplayStatus}
                         </p>
                       </div>
                     )}
@@ -505,7 +584,7 @@ export function UserMenu({ open, onClose }) {
               </div>
               <div className="mt-auto flex items-center justify-end gap-3 border-t border-slate-800 px-4 py-4 md:px-6">
                 <button type="button" onClick={handlePauseScreenCancel} className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:bg-slate-800">Annuler</button>
-                <button type="submit" disabled={isPauseSaving} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60">{isPauseSaving ? 'Enregistrement…' : 'Enregistrer'}</button>
+                <button type="submit" disabled={isPauseSaving || isPauseAutoUploading || pauseUploadPhase === 'uploading' || pauseUploadPhase === 'processing'} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60">{isPauseSaving ? 'Enregistrement…' : (pauseUploadPhase === 'uploading' || pauseUploadPhase === 'processing') ? 'Préparation…' : 'Enregistrer'}</button>
               </div>
             </form>
           )}
