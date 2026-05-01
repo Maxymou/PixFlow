@@ -178,7 +178,12 @@ function StoppedVideo({ mode, src }) {
         } : null,
       });
 
-      setHasError(true);
+      // Keep kiosk rendering tolerant to slow loads:
+      // only mark as error when the browser reports a terminal failure,
+      // not when it is still loading data.
+      if (video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE) {
+        setHasError(true);
+      }
     }, 10000);
 
     return () => clearTimeout(timeout);
@@ -200,7 +205,7 @@ function StoppedVideo({ mode, src }) {
         playsInline
         preload='auto'
         controls={mode === 'preview'}
-        className={mode === 'preview' ? 'h-full w-full object-contain' : 'max-h-full max-w-full object-contain'}
+        className={mode === 'preview' ? 'h-full w-full object-contain' : 'h-screen w-screen object-contain'}
         onLoadStart={() => console.log('[PixFlow] Pause screen video loadstart')}
         onLoadedMetadata={() => {
           console.log('[PixFlow] Pause screen video loadedmetadata');
@@ -236,8 +241,8 @@ function StoppedVideo({ mode, src }) {
           setHasError(true);
         }}
       />
-      {!isReady && (
-        <div className='absolute inset-0 flex items-center justify-center bg-black text-slate-300'>
+      {mode === 'preview' && !isReady && (
+        <div className='absolute inset-0 flex items-center justify-center bg-black/80 text-slate-300'>
           <p className='text-sm md:text-base'>Chargement de l’écran de pause…</p>
         </div>
       )}
