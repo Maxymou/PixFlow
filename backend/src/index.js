@@ -59,7 +59,54 @@ let latestKioskStatus = null;
 const KIOSK_HEARTBEAT_TIMEOUT_MS = 15_000;
 const ALLOWED_KIOSK_STATES = new Set(['playing', 'paused', 'stopped', 'loading', 'idle', 'error', 'no_active_project']);
 const ALLOWED_KIOSK_COMMANDS = new Set(['pause', 'play', 'stop']);
-const ALLOWED_DEBUG_ACTIONS = new Set(['update', 'restart-kiosk']);
+const DEBUG_MAX_COMMANDS = 8;
+const DEBUG_LABEL_MAX_LENGTH = 64;
+const DEBUG_DESCRIPTION_MAX_LENGTH = 200;
+const DEBUG_ACTIONS = {
+  update: {
+    value: 'update',
+    label: 'Mettre à jour PixFlow',
+    command: 'bash',
+    args: ['-lc', 'cd /home/maxymou/PixFlow && ./update.sh'],
+    requiresConfirmation: false,
+  },
+  'restart-kiosk': {
+    value: 'restart-kiosk',
+    label: 'Relancer le kiosk',
+    command: 'sudo',
+    args: ['systemctl', 'restart', 'pixflow-kiosk'],
+    requiresConfirmation: false,
+  },
+  'reboot-raspberry': {
+    value: 'reboot-raspberry',
+    label: 'Redémarrer le Raspberry',
+    command: 'sudo',
+    args: ['reboot'],
+    requiresConfirmation: true,
+  },
+  'restart-containers': {
+    value: 'restart-containers',
+    label: 'Relancer les conteneurs Docker',
+    command: 'bash',
+    args: ['-lc', 'cd /home/maxymou/PixFlow && docker compose up -d --build'],
+    requiresConfirmation: true,
+  },
+};
+const ALLOWED_DEBUG_ACTIONS = new Set(Object.keys(DEBUG_ACTIONS));
+const DEFAULT_DEBUG_COMMANDS = [
+  {
+    id: 'update',
+    label: 'Mettre à jour PixFlow',
+    description: 'Lance ./update.sh sur le Raspberry.',
+    action: 'update',
+  },
+  {
+    id: 'restart-kiosk',
+    label: 'Relancer le kiosk',
+    description: 'Redémarre le service pixflow-kiosk.',
+    action: 'restart-kiosk',
+  },
+];
 const DEBUG_COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 const DEBUG_OUTPUT_MAX_LENGTH = 8000;
 let latestKioskCommand = {
@@ -525,16 +572,46 @@ const runCommandWithTimeout = (command, args = [], { timeoutMs = DEBUG_COMMAND_T
   });
 });
 
+
+const normalizeDebugCommand = (command) => ({
+  id: String(command.id || '').trim(),
+  label: String(command.label || '').trim(),
+  description: String(command.description || '').trim(),
+  action: String(command.action || '').trim(),
+});
+
+const validateDebugCommands = (commands) => {
+  if (!Array.isArray(commands)) throw new Error('debugCommands must be an array');
+  if (commands.length > DEBUG_MAX_COMMANDS) throw new Error(`debugCommands cannot exceed ${DEBUG_MAX_COMMANDS} items`);
+
+  const seenIds = new Set();
+  return commands.map((raw, index) => {
+    const cmd = normalizeDebugCommand(raw || {});
+    if (!cmd.id || !cmd.label || !cmd.description || !cmd.action) throw new Error(`debugCommands[${index}] is incomplete`);
+    if (cmd.id.length > 40) throw new Error(`debugCommands[${index}].id is too long`);
+    if (cmd.label.length > DEBUG_LABEL_MAX_LENGTH) throw new Error(`debugCommands[${index}].label is too long`);
+    if (cmd.description.length > DEBUG_DESCRIPTION_MAX_LENGTH) throw new Error(`debugCommands[${index}].description is too long`);
+    if (!ALLOWED_DEBUG_ACTIONS.has(cmd.action)) throw new Error(`debugCommands[${index}].action is invalid`);
+    if (seenIds.has(cmd.id)) throw new Error(`debugCommands[${index}].id must be unique`);
+    seenIds.add(cmd.id);
+    return cmd;
+  });
+};
+
+const getDebugCommandsFromSettings = (settings) => {
+  try {
+    if (!Array.isArray(settings?.debugCommands)) return DEFAULT_DEBUG_COMMANDS;
+    const parsed = validateDebugCommands(settings.debugCommands);
+    return parsed.length ? parsed : DEFAULT_DEBUG_COMMANDS;
+  } catch {
+    return DEFAULT_DEBUG_COMMANDS;
+  }
+};
+
 const runDebugAction = async (action) => {
-  if (action === 'update') {
-    return runCommandWithTimeout('bash', ['-lc', 'cd /home/maxymou/PixFlow && ./update.sh']);
-  }
-
-  if (action === 'restart-kiosk') {
-    return runCommandWithTimeout('sudo', ['systemctl', 'restart', 'pixflow-kiosk']);
-  }
-
-  throw new Error('Action debug non autorisée');
+  const definition = DEBUG_ACTIONS[action];
+  if (!definition) throw new Error('Action debug non autorisée');
+  return runCommandWithTimeout(definition.command, definition.args);
 };
 
 const hasCommand = async (command) => {
@@ -1211,8 +1288,32 @@ app.patch('/api/settings/pause-screen', updatePauseScreenMode);
 app.post('/settings/pause-screen/upload', upload.single('file'), uploadPauseScreenMedia);
 app.post('/api/settings/pause-screen/upload', upload.single('file'), uploadPauseScreenMedia);
 
+
+app.get('/api/debug/commands', async (_req, res, next) => {
+  try {
+    const settings = await readJson(settingsFile);
+    const debugCommands = getDebugCommandsFromSettings(settings);
+    const actions = Object.values(DEBUG_ACTIONS).map(({ value, label, requiresConfirmation }) => ({ value, label, requiresConfirmation }));
+    res.json({ debugCommands, actions, limits: { maxCommands: DEBUG_MAX_COMMANDS, maxLabelLength: DEBUG_LABEL_MAX_LENGTH, maxDescriptionLength: DEBUG_DESCRIPTION_MAX_LENGTH } });
+  } catch (error) { next(error); }
+});
+
+app.patch('/api/debug/commands', async (req, res) => {
+  try {
+    const debugCommands = validateDebugCommands(req.body?.debugCommands);
+    const settings = await readJson(settingsFile);
+    settings.debugCommands = debugCommands;
+    await writeJson(settingsFile, settings);
+    return res.json({ ok: true, debugCommands, actions: Object.values(DEBUG_ACTIONS).map(({ value, label, requiresConfirmation }) => ({ value, label, requiresConfirmation })) });
+  } catch (error) {
+    return res.status(400).json({ ok: false, error: error.message || 'Invalid debug commands payload' });
+  }
+});
+
 app.post('/api/debug/action', async (req, res) => {
-  const action = typeof req.body?.action === 'string' ? req.body.action.trim() : '';
+  const payloadAction = typeof req.body?.action === 'string' ? req.body.action.trim() : '';
+  const payloadId = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
+  const action = payloadAction || payloadId;
   if (!ALLOWED_DEBUG_ACTIONS.has(action)) {
     return res.status(400).json({
       ok: false,
