@@ -955,6 +955,15 @@ app.patch('/settings/pause-screen', async (req, res, next) => {
       ...(settings.pauseScreen || {}),
     };
 
+    if (mode === 'custom' && (!currentPauseScreen.mediaType || !currentPauseScreen.mediaFile)) {
+      return res.status(400).json({ error: 'A custom pause screen requires an uploaded image or video' });
+    }
+
+    if (mode === 'default') {
+      const existingFiles = await fs.readdir(pauseScreenDir);
+      await Promise.all(existingFiles.map((file) => fs.rm(path.join(pauseScreenDir, file), { force: true })));
+    }
+
     settings.pauseScreen = {
       ...currentPauseScreen,
       mode,
@@ -969,6 +978,18 @@ app.patch('/settings/pause-screen', async (req, res, next) => {
 app.post('/settings/pause-screen/upload', upload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'file is required' });
+    const allowedPauseUploadTypes = new Set([
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'video/mp4',
+      'video/webm',
+      'video/quicktime',
+    ]);
+    if (!allowedPauseUploadTypes.has(req.file.mimetype)) {
+      return res.status(400).json({ error: 'unsupported file type for pause screen' });
+    }
+
     const mediaType = mediaTypeFromName(req.file.originalname, req.file.mimetype);
     if (!['image', 'video'].includes(mediaType)) {
       return res.status(400).json({ error: 'file must be image or video' });
@@ -978,7 +999,7 @@ app.post('/settings/pause-screen/upload', upload.single('file'), async (req, res
     await Promise.all(existingFiles.map((file) => fs.rm(path.join(pauseScreenDir, file), { force: true })));
 
     const ext = path.extname(req.file.originalname || req.file.filename).toLowerCase() || '.bin';
-    const finalName = `pause-screen-${Date.now()}${ext}`;
+    const finalName = `pause-screen-${nanoid()}${ext}`;
     const inputPath = path.join(incomingDir, req.file.filename);
     const finalPath = path.join(pauseScreenDir, finalName);
     await fs.rename(inputPath, finalPath);

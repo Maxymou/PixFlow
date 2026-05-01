@@ -118,7 +118,7 @@ export function UserMenu({ open, onClose }) {
 
   const handleCancel = () => setActivePanel('main');
   const pauseScreenLabel = pauseScreen.mode === 'custom'
-    ? (pauseScreen.mediaType === 'video' ? 'Vidéo perso' : 'Image perso')
+    ? (pauseScreen.mediaFile ? (pauseScreen.mediaType === 'video' ? 'Vidéo perso' : 'Image perso') : 'Aucun fichier sélectionné')
     : 'Par défaut';
 
   const handleHotspotToggle = async (event) => {
@@ -246,7 +246,11 @@ export function UserMenu({ open, onClose }) {
           setPausePreviewUrl(nextPauseScreen.mediaFile || '');
           setPauseUploadFile(null);
         } else {
-          await api('/api/settings/pause-screen', { method: 'PATCH', body: JSON.stringify({ mode: 'custom' }) });
+          const updated = await api('/api/settings/pause-screen', { method: 'PATCH', body: JSON.stringify({ mode: 'custom' }) });
+          const nextPauseScreen = { ...DEFAULT_PAUSE_SCREEN, ...(updated?.pauseScreen || {}) };
+          setPauseScreen(nextPauseScreen);
+          setPauseScreenDraft(nextPauseScreen);
+          setPausePreviewUrl(nextPauseScreen.mediaFile || '');
         }
       }
       setStatusMessage('Écran de pause enregistré.');

@@ -179,19 +179,6 @@ export function PlayerView() {
         if (!mounted) return;
         const nextPauseScreen = settings?.pauseScreen || null;
         setPauseScreen(nextPauseScreen);
-        if (nextPauseScreen?.mode === 'custom' && nextPauseScreen?.mediaFile) {
-          if (nextPauseScreen.mediaType === 'image') {
-            const img = new Image();
-            img.src = nextPauseScreen.mediaFile;
-          } else if (nextPauseScreen.mediaType === 'video') {
-            const preloadVideo = document.createElement('video');
-            preloadVideo.preload = 'auto';
-            preloadVideo.muted = true;
-            preloadVideo.playsInline = true;
-            preloadVideo.src = nextPauseScreen.mediaFile;
-            preloadVideo.load();
-          }
-        }
       } catch {
         setPauseScreen(null);
       }
@@ -199,6 +186,32 @@ export function PlayerView() {
     loadPauseScreen();
     return () => { mounted = false; };
   }, []);
+
+  useEffect(() => {
+    if (!pauseScreen || pauseScreen.mode !== 'custom' || !pauseScreen.mediaFile) return undefined;
+
+    if (pauseScreen.mediaType === 'image') {
+      const img = new Image();
+      img.src = pauseScreen.mediaFile;
+      return undefined;
+    }
+
+    if (pauseScreen.mediaType === 'video') {
+      const preloadVideo = document.createElement('video');
+      preloadVideo.preload = 'auto';
+      preloadVideo.muted = true;
+      preloadVideo.playsInline = true;
+      preloadVideo.src = pauseScreen.mediaFile;
+      preloadVideo.load();
+
+      return () => {
+        preloadVideo.removeAttribute('src');
+        preloadVideo.load();
+      };
+    }
+
+    return undefined;
+  }, [pauseScreen]);
 
   useEffect(() => {
     loadPlaylist();
