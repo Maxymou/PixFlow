@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 User=maxymou
 WorkingDirectory=/home/maxymou/PixFlow
+Environment=DEBUG_HOST_API_BIND=0.0.0.0
 ExecStart=/usr/bin/node /home/maxymou/PixFlow/scripts/pixflow-debug-api.js
 Restart=on-failure
 RestartSec=3

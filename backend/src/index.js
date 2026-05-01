@@ -584,14 +584,28 @@ async function callDebugHostApi(routePath, options = {}) {
   }
 
   const baseUrl = debugHostApiUrl.replace(/\/+$/, '');
-  const response = await fetch(`${baseUrl}${routePath}`, {
-    method: options.method || 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  let response;
+  try {
+    response = await fetch(`${baseUrl}${routePath}`, {
+      method: options.method || 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+  } catch (error) {
+    const routeLabel = routePath === '/commands' ? 'la liste des commandes Débug' : 'le service Débug';
+    const unavailableError = new Error(`Impossible de contacter pixflow-debug-api (${routeLabel}).`);
+    unavailableError.status = 503;
+    unavailableError.payload = {
+      ok: false,
+      error: 'pixflow-debug-api indisponible',
+      message: 'Impossible de contacter le service Débug côté Raspberry sur le port 4877.',
+      details: error.message,
+    };
+    throw unavailableError;
+  }
 
   const rawText = await response.text();
   let payload = null;
@@ -1352,7 +1366,12 @@ app.get(['/api/debug/commands', '/debug/commands'], async (_req, res, next) => {
     }
 
     res.json({ commands: debugCommands });
-  } catch (error) { next(error); }
+  } catch (error) {
+    if (error.payload) {
+      return res.status(error.status || 503).json(error.payload);
+    }
+    return next(error);
+  }
 });
 
 app.patch(['/api/debug/commands/:id', '/debug/commands/:id'], async (req, res) => {
